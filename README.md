@@ -6,10 +6,10 @@ Harness **не является твоей игрой и не заменяет �
 
 ```text
 unreal_harness/       технический harness, CLI, installer и launcher
-MyShooter/            твой Unreal-проект, его .uproject и Content/
+YourProject/           уже существующий пользовательский Unreal-проект
 ```
 
-`unreal_harness` устанавливается в `MyShooter`, но не требует переносить игру в репозиторий harness.
+Harness устанавливается в каталог уже существующего Unreal-проекта. Он не создаёт отдельную игру и не требует переименовывать проект.
 
 ## Что умеет harness
 
@@ -52,14 +52,14 @@ Unreal Engine и Visual Studio не устанавливаются этим ре
 
 ```powershell
 cd D:\Projects
-git clone <URL_ТВОЕГО_РЕПОЗИТОРИЯ> MyShooter
+git clone <URL_ТВОЕГО_РЕПОЗИТОРИЯ> YourProject
 ```
 
 В корне должны находиться, например:
 
 ```text
-D:\Projects\MyShooter\MyShooter.uproject
-D:\Projects\MyShooter\Content\
+D:\Projects\YourProject\YourProject.uproject
+D:\Projects\YourProject\Content\
 ```
 
 Если проект уже существует локально, этот шаг не нужен. Не добавляй в Git generated-каталоги Unreal:
@@ -97,7 +97,7 @@ git pull
 ```powershell
 cd D:\Tools\unreal_harness
 Set-ExecutionPolicy -Scope Process Bypass
-.\run.ps1 -Project "D:\Projects\MyShooter\MyShooter.uproject"
+.\run.ps1 -Project "D:\Projects\YourProject\YourProject.uproject"
 ```
 
 Что делает команда:
@@ -123,7 +123,7 @@ C:\Program Files\Epic Games\UE_5.8.3\Engine\Binaries\Win64\UnrealEditor.exe
 
 ```powershell
 .\run.ps1 `
-  -Project "D:\Projects\MyShooter\MyShooter.uproject" `
+  -Project "D:\Projects\YourProject\YourProject.uproject" `
   -EditorPath "D:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe"
 ```
 
@@ -131,7 +131,7 @@ C:\Program Files\Epic Games\UE_5.8.3\Engine\Binaries\Win64\UnrealEditor.exe
 
 ```powershell
 $env:UNREAL_EDITOR = "D:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe"
-.\run.ps1 -Project "D:\Projects\MyShooter\MyShooter.uproject"
+.\run.ps1 -Project "D:\Projects\YourProject\YourProject.uproject"
 ```
 
 После загрузки проекта в Output Log должна появиться строка:
@@ -148,7 +148,7 @@ $env:UNREAL_EDITOR = "D:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe"
 
 ```powershell
 .\run.ps1 `
-  -Project "D:\Projects\MyShooter\MyShooter.uproject" `
+  -Project "D:\Projects\YourProject\YourProject.uproject" `
   -NoInstall `
   -NoEditor
 ```
@@ -173,21 +173,21 @@ $env:UNREAL_EDITOR = "D:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe"
 
 ```powershell
 py scripts\install.py `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --enable-plugins
 ```
 
 Проверка без запуска Unreal:
 
 ```powershell
-py scripts\validate_install.py "D:\Projects\MyShooter"
+py scripts\validate_install.py "D:\Projects\YourProject"
 ```
 
 Безопасный предварительный просмотр изменений:
 
 ```powershell
 py scripts\install.py `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --dry-run
 ```
 
@@ -195,7 +195,7 @@ py scripts\install.py `
 
 ```powershell
 py scripts\install.py `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --enable-plugins `
   --force
 ```
@@ -204,7 +204,7 @@ py scripts\install.py `
 
 ```powershell
 py scripts\install.py `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --enable-plugins `
   --enable-native-mcp
 ```
@@ -215,7 +215,7 @@ py scripts\install.py `
 
 ```powershell
 py -m unreal_harness capabilities `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --timeout 60
 ```
 
@@ -223,7 +223,7 @@ py -m unreal_harness capabilities `
 
 ```powershell
 py -m unreal_harness inspect-level `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --limit 100 `
   --timeout 60
 ```
@@ -232,7 +232,7 @@ py -m unreal_harness inspect-level `
 
 ```powershell
 py -m unreal_harness list-assets `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --path /Game `
   --recursive `
   --limit 100 `
@@ -243,7 +243,7 @@ py -m unreal_harness list-assets `
 
 ```powershell
 py -m unreal_harness spawn-actor `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --class "/Game/AI/BP_Enemy.BP_Enemy_C" `
   --location '[100, 200, 0]' `
   --actor-label Enemy_01 `
@@ -309,7 +309,7 @@ $env:UNREAL_HARNESS_LLM_MODEL = "<точное-имя-модели-из-ollama-l
 
 ```powershell
 .\run.ps1 `
-  -Project "D:\Projects\MyShooter\MyShooter.uproject" `
+  -Project "D:\Projects\YourProject\YourProject.uproject" `
   -NoInstall `
   -NoEditor `
   -Prompt "Проинспектируй текущий уровень и перечисли найденные акторы" `
@@ -345,7 +345,7 @@ $env:UNREAL_HARNESS_LLM_API_KEY = "<api-key>"
 
 ```powershell
 .\run.ps1 `
-  -Project "D:\Projects\MyShooter\MyShooter.uproject" `
+  -Project "D:\Projects\YourProject\YourProject.uproject" `
   -NoInstall `
   -NoEditor `
   -Prompt "Создай базовый Blueprint BP_TestActor в /Game/Test и сохрани его" `
@@ -427,10 +427,10 @@ Timed out waiting for Unreal result.json
 cd D:\Tools\unreal_harness
 git pull
 py scripts\install.py `
-  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
   --enable-plugins `
   --force
-py scripts\validate_install.py "D:\Projects\MyShooter"
+py scripts\validate_install.py "D:\Projects\YourProject"
 ```
 
 Перед удалением timestamped backup-файлов проверь их содержимое.
