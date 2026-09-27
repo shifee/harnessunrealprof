@@ -26,11 +26,11 @@ class BenchmarkRunnerTests(unittest.TestCase):
             {"id": "same", "category": "supported", "shell": "rm -rf /", "document": {"commands": []}},
             {"id": "same", "category": "supported", "document": {"commands": []}},
         ]}
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as handle:
-            json.dump(manifest, handle)
-            handle.flush()
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path = Path(directory) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "duplicate task id"):
-                self.module["load_manifest"](handle.name)
+                self.module["load_manifest"](manifest_path)
 
     def test_dry_run_envelope_classifies_failed_task(self):
         manifest = {"version": "0.1", "tasks": [{

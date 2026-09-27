@@ -31,27 +31,15 @@ Top-level `recipes` expand into ordinary commands before dependency validation o
   "recipes": [{
     "id": "layout",
     "conflict_mode": "reuse",
-    "commands": [
+  "commands": [
       {"$repeat": {
         "items": [{"name":"A","x":0}, {"name":"B","x":200}],
         "template": {"id":"spawn_${name}","action":"level.spawn_actor","arguments":{"level":"current","class":"/Game/AI/BP_Block.BP_Block_C","actor_label":"Block ${name}","transform":{"location":["${x}",0,100]}}}
       }}
     ]
-  "graph_node_kinds": [
-    "function_call",
-    "event",
-    "operator",
-    "custom_event",
-    "branch",
-    "sequence",
-    "reroute",
-    "self",
-    "variable_get",
-    "variable_set",
-    "dynamic_cast",
-    "struct_make",
-    "struct_break"
-  ]
+  }]
+}
+```
 
 - `fail`: stop if the destination already exists.
 - `reuse`: use the existing compatible object without replacing it.
@@ -164,6 +152,46 @@ Returns the action catalog and whether each action mutates editor state.
 {"id":"describe","action":"system.describe_actions","arguments":{}}
 ```
 
+## `recipe.validate`
+
+Expands and validates a recipe without executing its commands.
+
+```json
+{"id":"check_recipe","action":"recipe.validate","arguments":{"recipe":{"id":"layout","commands":[]}}}
+```
+
+## `recipe.execute`
+
+Expands and executes a validated recipe through the normal transaction and audit envelope. The result includes nested command results.
+
+```json
+{"id":"run_recipe","action":"recipe.execute","arguments":{"recipe":{"id":"layout","commands":[]}}}
+```
+
+## `backend.capabilities`
+
+Lists registered backends and their supported operations.
+
+```json
+{"id":"backends","action":"backend.capabilities","arguments":{}}
+```
+
+## `backend.describe`
+
+Returns the descriptor for one registered backend.
+
+```json
+{"id":"backend","action":"backend.describe","arguments":{"backend":"backend_id"}}
+```
+
+## `backend.operation`
+
+Invokes a registered backend operation. `operation` must be one of `validate`, `inspect`, `mutate`, or `diagnostics`; `payload` is an object and defaults to `{}`. Discover registered backends with `backend.capabilities` first.
+
+```json
+{"id":"inspect_backend","action":"backend.operation","arguments":{"backend":"backend_id","operation":"inspect","payload":{}}}
+```
+
 ## `content.create_folder`
 
 ```json
@@ -198,6 +226,14 @@ Returns asset classes and editor factory wrappers discoverable through AssetRegi
 
 ```json
 {"id":"types","action":"asset.describe_types","arguments":{"limit":100,"offset":0}}
+```
+
+## `asset.create`
+
+Creates an asset through Unreal Asset Tools. `folder` and `name` are required, along with a native `class` (or `asset_class`) or `factory` path. Existing assets can only be reused when compatible; replacement is disabled. Save the new asset explicitly with `asset.save` or `project.save`.
+
+```json
+{"id":"create_asset","action":"asset.create","arguments":{"folder":"/Game/AI","name":"Curve_Test","class":"/Script/Engine.CurveFloat"}}
 ```
 
 ## `asset.duplicate`

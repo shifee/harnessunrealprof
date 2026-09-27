@@ -1,9 +1,26 @@
 import unittest
+from io import BytesIO
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 from unreal_harness.providers import OpenAICompatiblePlanner, ProviderError
 
 
 class ProviderContractTests(unittest.TestCase):
+    def test_retries_with_json_schema_when_server_rejects_json_object(self):
+        planner = OpenAICompatiblePlanner(model="test")
+        unsupported = HTTPError(
+            "http://localhost/chat/completions", 400, "Bad Request", {},
+            BytesIO(b'{"error":"response_format.type must be json_schema or text"}'),
+        )
+        response = {"choices": [{"message": {"content": '{"commands": []}'}}]}
+        with patch.object(planner, "_request", side_effect=[unsupported, response]) as request:
+            self.assertEqual(planner("inspect", {"capabilities": {"actions": ["level.inspect"]}}), {"commands": []})
+        self.assertIn("response_format", request.call_args_list[0].args[0])
+        retry_format = request.call_args_list[1].args[0]["response_format"]
+        self.assertEqual(retry_format["type"], "json_schema")
+        self.assertEqual(retry_format["json_schema"]["schema"]["properties"]["commands"]["items"]["properties"]["action"]["enum"], ["level.inspect"])
+
     def test_valid_plan_accepts_ordered_dependencies(self):
         OpenAICompatiblePlanner.validate_plan(
             {
