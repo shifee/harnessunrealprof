@@ -1,9 +1,16 @@
 {
+  "object.describe": {"object": "/Game/AI/M_Iron.M_Iron"},
+  "object.inspect": {"object": "/Game/AI/M_Iron.M_Iron", "properties": ["TwoSided"]},
+  "object.set": {"object": "/Game/AI/M_Iron.M_Iron", "properties": {"TwoSided": true}},
   "system.capabilities": {},
   "system.describe_actions": {},
   "content.create_folder": {"path": "/Game/Test"},
   "content.list": {"path": "/Game", "limit": 10},
   "asset.inspect": {"asset": "/Game/Test/Asset.Asset"},
+  "asset.search": {"path": "/Game", "limit": 10},
+  "asset.describe_types": {},
+  "asset.duplicate": {"source": "/Game/Test/Asset.Asset", "destination": "/Game/Test/AssetCopy.AssetCopy"},
+  "asset.save": {"assets": ["/Game/Test/Asset.Asset"]},
   "material.create": {"folder": "/Game/Test", "name": "M_Test"},
   "material.inspect": {"material": "/Game/Test/M_Test.M_Test"},
   "material_instance.create": {"folder": "/Game/Test", "name": "MI_Test", "parent": "/Game/Test/M_Test.M_Test"},
@@ -11,14 +18,24 @@
   "blueprint.create": {"folder": "/Game/Test", "name": "BP_Test", "parent_class": "/Script/Engine.Actor"},
   "blueprint.inspect": {"blueprint": "/Game/Test/BP_Test.BP_Test"},
   "blueprint.compile": {"blueprint": "/Game/Test/BP_Test.BP_Test"},
-  "blueprint.edit": {"blueprint": "/Game/Test/BP_Test.BP_Test", "operations": []},
+  "blueprint.edit": {"blueprint": "/Game/Test/BP_Test.BP_Test", "operations": [{"operation": "add_variable", "name": "HarnessCounter", "variable_type": "int"}]},
   "blueprint.graph.inspect": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph"},
-  "blueprint.graph.add_node": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph", "node_id": "node", "node": {"kind": "branch"}},
+  "graph.describe": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph"},
+  "graph.search_nodes": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph", "query": "branch"},
+  "graph.describe_node": {"kind": "branch"},
+  "blueprint.graph.add_node": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph", "node_id": "add_int", "node": {"kind": "operator", "owner_class": "/Script/Engine.KismetMathLibrary", "function": "Add_IntInt"}},
   "blueprint.graph.connect": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph", "from": {"node": "a", "pin": "then"}, "to": {"node": "b", "pin": "execute"}},
   "blueprint.graph.set_pin_value": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph", "node": "node", "pin": "condition", "value": "true"},
+  "blueprint.graph.remove_node": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph", "node": "branch"},
+  "blueprint.graph.disconnect": {"blueprint": "/Game/Test/BP_Test.BP_Test", "graph": "EventGraph", "from": {"node": "a", "pin": "then"}, "to": {"node": "b", "pin": "execute"}},
   "level.inspect": {"limit": 10},
   "level.spawn_actor": {"level": "current", "class": "/Script/Engine.Actor", "actor_label": "Test"},
   "level.set_actor_transform": {"actor_label": "Test", "transform": {"location": [0, 0, 0]}},
   "level.set_actor_property": {"actor_label": "Test", "property": "tags", "value": ["Test"]},
   "project.save": {"save_level": false, "save_assets": true}
+  ,"recipe.validate": {"recipe": {"parameters": {}, "commands": []}}
+  ,"recipe.execute": {"recipe": {"parameters": {}, "commands": []}}
+  ,"backend.capabilities": {}
+  ,"backend.describe": {"backend": "missing"}
+  ,"backend.operation": {"backend": "missing", "operation": "inspect", "payload": {}}
 }

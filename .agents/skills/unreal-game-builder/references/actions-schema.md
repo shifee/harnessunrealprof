@@ -18,6 +18,9 @@ The executor validates the complete document before making changes. IDs must be 
 
 ## Declarative recipes
 
+Recipes support `parameter_schema` with `required` and primitive `types` (`string`, `number`, `boolean`, `array`, `object`). `recipe.validate` expands and validates a recipe without mutation; `recipe.execute` runs its expanded commands through the normal transaction and audit envelope. Command arguments may contain `{"$ref":"command_id.data.field"}` references to earlier command results. A command may declare `condition` with `ref` and one of `equals`, `not_equals`, or `exists`; false conditions produce a successful skipped command with no changed objects. References and conditions cannot execute code.
+
+
 Top-level `recipes` expand into ordinary commands before dependency validation or mutation. A recipe has a unique `id`, one conflict mode, and a `commands` template. Exact `${name}` substitutions preserve the JSON value type; substitutions embedded in a larger string produce a string.
 
 ```json
@@ -34,17 +37,21 @@ Top-level `recipes` expand into ordinary commands before dependency validation o
         "template": {"id":"spawn_${name}","action":"level.spawn_actor","arguments":{"level":"current","class":"/Game/AI/BP_Block.BP_Block_C","actor_label":"Block ${name}","transform":{"location":["${x}",0,100]}}}
       }}
     ]
-  }]
-}
-```
-
-Patterns can appear anywhere inside a recipe array, including an action's `operations` array:
-
-- `$repeat`: `items` is an array of variable objects; `index` is added when absent.
-- `$mirror`: `axis` is `x`, `y`, or `z`; `item` describes the original; the second expansion negates that coordinate and then applies optional `overrides`; `mirror_index` is `0` or `1`.
-- `$grid`: `axes` maps variable names to non-empty arrays and is expanded as a Cartesian product. It exposes `index`, `<name>_index`, and `axis_<n>_index`; optional `base` adds shared variables.
-
-Each expanded command receives `recipe_id`, and its arguments inherit the recipe's `conflict_mode` unless explicitly set. Modes are:
+  "graph_node_kinds": [
+    "function_call",
+    "event",
+    "operator",
+    "custom_event",
+    "branch",
+    "sequence",
+    "reroute",
+    "self",
+    "variable_get",
+    "variable_set",
+    "dynamic_cast",
+    "struct_make",
+    "struct_break"
+  ]
 
 - `fail`: stop if the destination already exists.
 - `reuse`: use the existing compatible object without replacing it.
@@ -75,6 +82,71 @@ Every result uses a stable audit envelope:
 ```
 
 Failed commands preserve the readable `error` field and add a stable `error_code`. Entries in the top-level `errors` array contain `command_id`, `code`, `message`, and a traceback for diagnostics. `changed_objects` is present on every executed command and at the top level; inspect it before retrying a failed mutating batch.
+
+## Typed values
+
+Transport values may use explicit typed envelopes; the executor never guesses an Unreal object, class, soft reference, or enum from a plain string:
+
+```json
+{"$type":"object","path":"/Game/AI/M_Iron.M_Iron"}
+{"$type":"class","path":"/Script/Engine.Actor"}
+{"$type":"soft_object","path":"/Game/AI/M_Iron.M_Iron"}
+{"$type":"soft_class","path":"/Script/Engine.Actor"}
+{"$type":"enum","name":"Visible"}
+```
+
+Typed envelopes accept only their documented fields. Object existence, class compatibility, property reflection, and enum-member validity remain Unreal-side responsibilities; transport-side codec validation only checks envelope shape.
+
+## `object.describe`
+
+Returns the reflected class and bounded editor-property names for a loaded UObject.
+
+```json
+{"id":"describe_object","action":"object.describe","arguments":{"object":"/Game/AI/M_Iron.M_Iron","limit":200}}
+```
+
+## `object.inspect`
+
+Reads explicitly selected editor properties with a bounded recursive depth. `properties` is required and no implicit bulk dump is performed.
+
+```json
+{"id":"inspect_object","action":"object.inspect","arguments":{"object":"/Game/AI/M_Iron.M_Iron","properties":["NaniteSettings"],"depth":2}}
+```
+
+## `object.set`
+
+Sets explicitly selected editor properties inside the normal harness transaction. The target is reported in `changed_objects`; Unreal remains authoritative for reflected type compatibility and property metadata.
+
+```json
+{"id":"set_object","action":"object.set","arguments":{"object":"/Game/AI/M_Iron.M_Iron","properties":{"TwoSided":true}}}
+```
+
+
+Reflection failures use stable codes: `object_not_found` when the UObject cannot be loaded, `reflection_unavailable` when editor property metadata is unavailable, `property_not_found` for an unknown selected property, `property_read_failed` for a failed read, and `property_write_failed` for a failed write. `object.set` validates every property before calling `modify()` or changing any value.
+`object.set` accepts the same explicit typed envelopes as the transport codec. `$type: object` and `$type: class` resolve loaded references before mutation; `$type: soft_object` and `$type: soft_class` preserve soft paths; `$type: enum` passes the explicit member name to Unreal. Nested arrays and maps are decoded recursively. Unknown envelope fields and unresolved hard references fail before `modify()`.
+When Unreal exposes property metadata, `object.set` rejects `ReadOnly`, `EditConst`, `Transient`, and `Deprecated` flags before opening a mutation. Fake/runtime metadata may declare `type` as `bool`, `number`, `string`, `array`, `set`, `map`, or `enum`; mismatches return `property_type_mismatch`. Unreal remains authoritative for native `FProperty` compatibility when metadata is unavailable.
+Metadata may additionally declare enum `values`, reference `class`, or struct `fields` and `required` lists. Invalid enum members return `enum_value_invalid`; incompatible references return `reference_type_mismatch`; unknown or missing struct fields return `struct_field_invalid`. These checks are pre-mutation checks.
+
+## `object.describe_functions`
+
+Returns the explicitly allowlisted callable functions for a loaded object class. This is a policy catalog, not a complete Unreal `UFunction` reflection dump. Unknown classes and functions are denied.
+
+```json
+{"id":"functions","action":"object.describe_functions","arguments":{"object":"/Game/Input/IMC_Default.IMC_Default"}}
+```
+
+## `object.call`
+
+Invokes one explicitly allowlisted reflected function after validating the target, argument names, typed references, and policy. Calls run inside the normal editor transaction. A denied or invalid call is rejected before `modify()` and reports no changed objects.
+
+```json
+{"id":"map_key","action":"object.call","arguments":{"object":"/Game/Input/IMC_Default.IMC_Default","function":"MapKey","arguments":{"action":{"$type":"object","path":"/Game/Input/IA_Jump.IA_Jump"},"to_key":{"$type":"struct","class":"Key","value":{"key_name":"SpaceBar"}}}}}
+```
+
+The initial allowlist contains `UInputMappingContext::MapKey(const UInputAction*, FKey)`. Its catalog declares the reflected return fields `action` (typed UObject), `key` (struct `Key`), `triggers` (array), and `modifiers` (array). Return values are serialized through the reflected Python wrapper; mutating calls are transaction-scoped. In the validated UE 5.8.3 wrapper, `MapKey` returns these fields as bounded structured JSON. Generic enum, array, and out-parameter policy entries require separate native fixtures and are not implied by this function.
+
+
+
 
 ## `system.capabilities`
 
@@ -110,6 +182,38 @@ Lists asset paths with bounded output. Arguments: `path` (default `/Game`), `rec
 
 ```json
 {"id":"asset","action":"asset.inspect","arguments":{"asset":"/Game/AI/BP_Test.BP_Test"}}
+```
+
+## `asset.search`
+
+Lists registered assets under a virtual path without loading them. Supports `path`, `recursive`, optional `query`, optional asset `class`, and bounded `limit` (1–2000) plus `offset` (0–1000000). The response includes the full matching `total`, returned page `assets`, `has_more`, `truncated`, `offset`, and `limit`.
+
+```json
+{"id":"search_page","action":"asset.search","arguments":{"path":"/Game/AI","recursive":true,"limit":100,"offset":100}}
+```
+
+## `asset.describe_types`
+
+Returns asset classes and editor factory wrappers discoverable through AssetRegistry and the exposed AssetTools/Python API. It does not mutate project state. Results are bounded with `limit` (1–2000) and `offset` (0–1000000); classes and factories each include independent totals, offsets, and `has_more` metadata.
+
+```json
+{"id":"types","action":"asset.describe_types","arguments":{"limit":100,"offset":0}}
+```
+
+## `asset.duplicate`
+
+Duplicates one existing asset to a new package path. The destination must not already exist; replacement and deletion are not supported.
+
+```json
+{"id":"copy","action":"asset.duplicate","arguments":{"source":"/Game/AI/M_Source.M_Source","destination":"/Game/AI/M_Copy.M_Copy"}}
+```
+
+## `asset.save`
+
+Saves only explicitly listed loaded assets or packages. At least one of `assets` or `packages` is required.
+
+```json
+{"id":"save_asset","action":"asset.save","arguments":{"assets":["/Game/AI/M_Copy.M_Copy"]}}
 ```
 
 ## `material.create`
@@ -168,7 +272,7 @@ Compilation success follows Unreal's `BlueprintStatus`, not merely completion of
 
 ## `blueprint.edit`
 
-Operations: `add_component`, `set_component_property`, `set_component_material`, `set_component_transform`, and `set_class_property`.
+Operations: `add_component`, `add_variable`, `set_component_property`, `set_component_material`, `set_component_transform`, and `set_class_property`.
 
 ```json
 {
@@ -184,6 +288,32 @@ Operations: `add_component`, `set_component_property`, `set_component_material`,
 }
 ```
 
+## `graph.describe`
+
+Returns read-only context for an existing Blueprint graph: canonical graph name, node count, parent class, and generated class.
+
+```json
+{"id":"graph_context","action":"graph.describe","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","graph":"EventGraph"}}
+```
+
+## `graph.search_nodes`
+
+Searches the native graph bridge catalog for supported node kinds in the selected Blueprint graph. Results are candidates only; `ambiguous: true` means the caller must choose a returned `kind` and no node is selected automatically.
+
+```json
+{"id":"node_search","action":"graph.search_nodes","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","graph":"EventGraph","query":"branch"}}
+```
+
+## `graph.describe_node`
+
+Returns the stable `node_spec` for one supported node kind. The spec uses machine identifiers (`kind`, parameter names), not localized display text.
+
+```json
+{"id":"node_spec","action":"graph.describe_node","arguments":{"kind":"function_call"}}
+```
+
+Catalog failures use `blueprint_not_found`, `graph_not_found`, and `node_kind_not_found`.
+
 ## `blueprint.graph.inspect`
 
 Returns node GUIDs, classes, titles, positions, pins, defaults, types, and links.
@@ -194,17 +324,24 @@ Returns node GUIDs, classes, titles, positions, pins, defaults, types, and links
 
 ## `blueprint.graph.add_node`
 
-Supported `node.kind` values are reported by `system.capabilities`: `function_call`, `event`, `branch`, `sequence`, `reroute`, `self`, `variable_get`, `variable_set`, and `dynamic_cast`. `node_id` is a document-local alias usable by later graph commands.
+Supported `node.kind` values are reported by `system.capabilities`: `function_call`, `event`, `operator`, `custom_event`, `branch`, `sequence`, `reroute`, `self`, `variable_get`, `variable_set`, `dynamic_cast`, `struct_make`, and `struct_break`. `node_id` is a document-local alias usable by later graph commands.
 
 ```json
-{"id":"add_branch","action":"blueprint.graph.add_node","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","graph":"EventGraph","node_id":"branch","node":{"kind":"branch"},"position":[300,0]}}
+{"id":"add_int","action":"blueprint.graph.add_node","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","graph":"EventGraph","node_id":"add_int","node":{"kind":"operator","owner_class":"/Script/Engine.KismetMathLibrary","function":"Add_IntInt"},"position":[300,0]}}
 ```
 
 Kind-specific fields:
-
 - `function_call` and `event`: `owner_class`, `function`.
+- `operator`: `owner_class` and `function`; the current safe subset accepts only `/Script/Engine.KismetMathLibrary.Add_IntInt` and creates the native integer commutative operator node.
+- `custom_event`: `event_name`; it must be a valid, non-duplicate custom event name and the graph must be an Event Graph.
 - `variable_get` and `variable_set`: `variable_name` (the variable must already exist).
 - `dynamic_cast`: `target_class`.
+- `struct_make` and `struct_break`: `struct_path`, a fully-qualified native `UScriptStruct` object path such as `/Script/CoreUObject.Vector` or `/Script/CoreUObject.Transform`.
+
+`blueprint.edit` `add_variable` accepts `name` and one of the safe basic `variable_type` values: `bool`, `byte`, `int`, `int64`, `float`, `double`, `string`, `name`, or `text`. Variables must not already exist.
+
+`node_id` is a document-local alias usable by later graph commands.
+ 
 
 ## `blueprint.graph.connect`
 
@@ -222,6 +359,26 @@ Values are passed as strings to Unreal's graph schema.
 {"id":"condition","action":"blueprint.graph.set_pin_value","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","graph":"EventGraph","node":"branch","pin":"condition","value":"true"}}
 ```
 
+
+## `blueprint.graph.remove_node`
+
+Removes a node identified by document-local `node` alias or node GUID. The graph defaults to `EventGraph`.
+
+```json
+{"id":"remove","action":"blueprint.graph.remove_node","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","graph":"EventGraph","node":"branch"}}
+```
+
+## `blueprint.graph.disconnect`
+
+Disconnects one link using `from` and `to` endpoint objects, or every link on a specified `node`/`pin` when `all` is true.
+
+```json
+{"id":"unwire","action":"blueprint.graph.disconnect","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","from":{"node":"begin_play","pin":"then"},"to":{"node":"branch","pin":"execute"}}}
+```
+
+```json
+{"id":"unwire_pin","action":"blueprint.graph.disconnect","arguments":{"blueprint":"/Game/AI/Blueprints/BP_Test.BP_Test","node":"branch","pin":"execute","all":true}}
+```
 ## `level.inspect`
 
 Arguments: `query`, exact `class`, `selected_only`, and `limit` (1–5000).
@@ -265,3 +422,4 @@ Mutating commands participate in editor Undo transactions. Persistence is explic
 ## Deliberate exclusions
 
 The harness does not expose arbitrary Python, shell execution, asset deletion, Blueprint replacement, or bulk destructive operations. UE 5.8's native Unreal MCP can be enabled alongside the harness for interactive tool discovery, but the JSON executor remains the deterministic batch and audit layer.
+- `blueprint.edit` supports `add_variable` for native Blueprint member variables. Required fields: `name` and `variable_type`. Supported basic types: `bool`, `byte`, `int`, `int64`, `float`, `double`, `string`, `name`, `text`. The operation rejects empty names, unsupported types, and native insertion failures before reporting success; variable access nodes require the variable to exist and be Blueprint-visible.

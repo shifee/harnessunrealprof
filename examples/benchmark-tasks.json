@@ -1,0 +1,23 @@
+{
+  "version": "0.1",
+  "tasks": [
+    {
+      "id": "inspect-level-contract",
+      "category": "supported",
+      "goal": "Inspect the current level",
+      "document": {"format_version": "1.0", "commands": [{"id": "inspect", "action": "level.inspect", "arguments": {"limit": 10}}]}
+    },
+    {
+      "id": "capabilities-contract",
+      "category": "supported",
+      "goal": "Read the harness action catalog",
+      "document": {"format_version": "1.0", "commands": [{"id": "capabilities", "action": "system.capabilities", "arguments": {}}]}
+    },
+    {
+      "id": "recipe-validation-contract",
+      "category": "contract_only",
+      "goal": "Validate an empty declarative recipe",
+      "document": {"format_version": "1.0", "commands": [{"id": "validate", "action": "recipe.validate", "arguments": {"recipe": {"parameters": {}, "commands": []}}}]}
+    }
+  ]
+}

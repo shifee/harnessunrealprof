@@ -1,0 +1,36 @@
+{
+  "format_version": "0.1",
+  "harness_version": "0.1.0",
+  "engine": {
+    "supported": ["UE 5.8"],
+    "validated": ["UE 5.8.3-58210709"]
+  },
+  "support": {
+    "supported_native": [
+      {"area": "reflection", "evidence": "native-reflection"},
+      {"area": "asset-lifecycle", "evidence": "asset-create-save-reopen"},
+      {"area": "allowlisted-object-call", "evidence": "stage3-mapkey-positive"},
+      {"area": "blueprint-k2-subset", "evidence": "operator-add-int-and-graph-smoke"},
+      {"area": "material", "evidence": "Run_20260927_material_v6"}
+    ],
+    "contract_only": [
+      {"area": "backend-registry", "reason": "registered declarative handlers and stable errors; no complete external SDK or automatic selection"},
+      {"area": "recipes", "reason": "atomic preflight, references, conditions, expansion, and audit envelope covered by contract tests"}
+    ],
+    "unsupported": [
+      {"area": "enhanced-input-action-event", "evidence": "K2Node_EnhancedInput.h unavailable to plugin target"},
+      {"area": "blueprint-action-database-contextual-search", "reason": "no safe native bridge"},
+      {"area": "macro-creation", "reason": "no safe native bridge"},
+      {"area": "ai-behavior-tree-blackboard", "reason": "no safe native bridge"},
+      {"area": "sequencer-niagara-pcg-control-rig-animation-graph-world-partition", "reason": "no confirmed safe adapter"}
+    ]
+  },
+  "benchmark": {
+    "manifest": "examples/benchmark-tasks.json",
+    "reference_tasks": 3,
+    "required_for_stage_9": 100,
+    "coverage_threshold_percent": 80,
+    "status": "reference_manifest_only",
+    "coverage_claimed": false
+  }
+}

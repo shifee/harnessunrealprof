@@ -6,14 +6,19 @@
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_CommutativeAssociativeBinaryOperator.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_Knot.h"
+#include "K2Node_MakeStruct.h"
+#include "K2Node_BreakStruct.h"
 #include "K2Node_Self.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "K2Node_CustomEvent.h"
+#include "UObject/UnrealType.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
@@ -186,6 +191,105 @@ TSharedPtr<FJsonObject> ParseParameters(const FString& ParametersJson, FString& 
     }
     return Parsed;
 }
+
+bool ValidateVariableAccess(
+    UBlueprint* Blueprint,
+    const FString& VariableName,
+    bool bForSet,
+    FString& OutError
+)
+{
+    if (!Blueprint || !Blueprint->GeneratedClass)
+    {
+        OutError = TEXT("Blueprint generated class is unavailable for variable validation");
+        return false;
+    }
+    const FProperty* Property = FindFProperty<FProperty>(
+        Blueprint->GeneratedClass,
+        FName(*VariableName)
+    );
+    if (!Property)
+    {
+        OutError = FString::Printf(TEXT("Blueprint variable not found: %s"), *VariableName);
+        return false;
+    }
+    const EPropertyFlags RequiredFlags = CPF_BlueprintVisible;
+    if (!Property->HasAnyPropertyFlags(RequiredFlags))
+    {
+        OutError = FString::Printf(TEXT("Blueprint variable is not Blueprint-visible: %s"), *VariableName);
+        return false;
+    }
+    if (bForSet && Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly | CPF_EditConst | CPF_Transient))
+    {
+        OutError = FString::Printf(TEXT("Blueprint variable is read-only or transient: %s"), *VariableName);
+        return false;
+    }
+    return true;
+}
+}
+
+namespace
+{
+TSharedRef<FJsonObject> CatalogError(const FString& Code, const FString& Message)
+{
+    const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), false);
+    Result->SetStringField(TEXT("error_code"), Code);
+    Result->SetStringField(TEXT("error"), Message);
+    return Result;
+}
+
+TSharedRef<FJsonObject> MakeNodeSpec(const FString& Kind, const FString& Title, const FString& Description)
+{
+    const TSharedRef<FJsonObject> Spec = MakeShared<FJsonObject>();
+    Spec->SetStringField(TEXT("kind"), Kind);
+    Spec->SetStringField(TEXT("title"), Title);
+    Spec->SetStringField(TEXT("description"), Description);
+    Spec->SetBoolField(TEXT("available"), true);
+    TArray<TSharedPtr<FJsonValue>> Parameters;
+    if (Kind == TEXT("function_call") || Kind == TEXT("event") || Kind == TEXT("operator"))
+    {
+        Parameters.Add(MakeShared<FJsonValueString>(TEXT("owner_class")));
+        Parameters.Add(MakeShared<FJsonValueString>(TEXT("function")));
+    }
+    else if (Kind == TEXT("custom_event"))
+    {
+        Parameters.Add(MakeShared<FJsonValueString>(TEXT("event_name")));
+    }
+    else if (Kind == TEXT("variable_get") || Kind == TEXT("variable_set"))
+    {
+        Parameters.Add(MakeShared<FJsonValueString>(TEXT("variable_name")));
+    }
+    else if (Kind == TEXT("dynamic_cast"))
+    {
+        Parameters.Add(MakeShared<FJsonValueString>(TEXT("target_class")));
+    }
+    else if (Kind == TEXT("struct_make") || Kind == TEXT("struct_break"))
+    {
+        Parameters.Add(MakeShared<FJsonValueString>(TEXT("struct_path")));
+    }
+    Spec->SetArrayField(TEXT("parameters"), Parameters);
+    return Spec;
+}
+
+TArray<TSharedRef<FJsonObject>> CatalogNodeSpecs()
+{
+    return {
+        MakeNodeSpec(TEXT("function_call"), TEXT("Function Call"), TEXT("Call a reflected Blueprint function")),
+        MakeNodeSpec(TEXT("event"), TEXT("Event"), TEXT("Add an event entry node")),
+        MakeNodeSpec(TEXT("operator"), TEXT("Integer Add Operator"), TEXT("Add the constrained Kismet integer addition operator")),
+        MakeNodeSpec(TEXT("custom_event"), TEXT("Custom Event"), TEXT("Add a named custom event entry node")),
+        MakeNodeSpec(TEXT("branch"), TEXT("Branch"), TEXT("Conditional execution branch")),
+        MakeNodeSpec(TEXT("sequence"), TEXT("Sequence"), TEXT("Sequential execution outputs")),
+        MakeNodeSpec(TEXT("reroute"), TEXT("Reroute"), TEXT("Execution or data wire reroute")),
+        MakeNodeSpec(TEXT("self"), TEXT("Self"), TEXT("Reference to the Blueprint self object")),
+        MakeNodeSpec(TEXT("variable_get"), TEXT("Get Variable"), TEXT("Read a Blueprint-visible variable")),
+        MakeNodeSpec(TEXT("variable_set"), TEXT("Set Variable"), TEXT("Write a writable Blueprint-visible variable")),
+        MakeNodeSpec(TEXT("dynamic_cast"), TEXT("Cast To"), TEXT("Cast an object to a target class")),
+        MakeNodeSpec(TEXT("struct_make"), TEXT("Make Struct"), TEXT("Construct a reflected struct value")),
+        MakeNodeSpec(TEXT("struct_break"), TEXT("Break Struct"), TEXT("Extract reflected struct members"))
+    };
+}
 }
 
 FString UUnrealCodexGraphLibrary::GetCapabilities()
@@ -197,14 +301,15 @@ FString UUnrealCodexGraphLibrary::GetCapabilities()
     Result->SetStringField(TEXT("engine_target"), TEXT("5.8"));
     Result->SetBoolField(TEXT("function_call_nodes"), true);
     Result->SetBoolField(TEXT("event_nodes"), true);
+    Result->SetBoolField(TEXT("custom_event_nodes"), true);
     Result->SetBoolField(TEXT("pin_connections"), true);
     Result->SetBoolField(TEXT("pin_default_values"), true);
     Result->SetBoolField(TEXT("graph_inspection"), true);
     TArray<TSharedPtr<FJsonValue>> NodeKinds;
     for (const TCHAR* Kind : {
-        TEXT("function_call"), TEXT("event"), TEXT("branch"), TEXT("sequence"),
+        TEXT("function_call"), TEXT("event"), TEXT("operator"), TEXT("custom_event"), TEXT("branch"), TEXT("sequence"),
         TEXT("reroute"), TEXT("self"), TEXT("variable_get"), TEXT("variable_set"),
-        TEXT("dynamic_cast")
+        TEXT("dynamic_cast"), TEXT("struct_make"), TEXT("struct_break")
     })
     {
         NodeKinds.Add(MakeShared<FJsonValueString>(Kind));
@@ -250,6 +355,44 @@ FString UUnrealCodexGraphLibrary::AddNode(
         }
         return AddEventNode(BlueprintPath, GraphName, OwnerClass, Function, Position);
     }
+    if (NodeKind.Equals(TEXT("custom_event"), ESearchCase::IgnoreCase))
+    {
+        FString EventName;
+        if (!Parameters->TryGetStringField(TEXT("event_name"), EventName) || EventName.IsEmpty())
+        {
+            return UnrealCodexGraph::Error(TEXT("custom_event requires event_name"));
+        }
+        UBlueprint* Blueprint = UnrealCodexGraph::LoadBlueprint(BlueprintPath, ErrorMessage);
+        UEdGraph* Graph = Blueprint ? UnrealCodexGraph::FindGraph(Blueprint, GraphName, ErrorMessage) : nullptr;
+        if (!Graph)
+        {
+            return UnrealCodexGraph::Error(ErrorMessage);
+        }
+        if (!FBlueprintEditorUtils::IsEventGraph(Graph))
+        {
+            return UnrealCodexGraph::Error(TEXT("custom_event requires an event graph"));
+        }
+        if (FBlueprintEditorUtils::FindCustomEventNode(Blueprint, FName(*EventName)))
+        {
+            return UnrealCodexGraph::Error(TEXT("custom_event name already exists"));
+        }
+        const FScopedTransaction Transaction(NSLOCTEXT("UnrealCodexGraph", "AddCustomEvent", "Add Blueprint custom event"));
+        Blueprint->Modify();
+        Graph->Modify();
+        UK2Node_CustomEvent* Node = NewObject<UK2Node_CustomEvent>(Graph);
+        Node->CreateNewGuid();
+
+        Node->CustomFunctionName = FName(*EventName);
+        Node->bIsEditable = true;
+        Node->SetFlags(RF_Transactional);
+        Node->NodePosX = FMath::RoundToInt(Position.X);
+        Node->NodePosY = FMath::RoundToInt(Position.Y);
+        Node->AllocateDefaultPins();
+        Node->PostPlacedNewNode();
+        Graph->AddNode(Node, true, false);
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+        return UnrealCodexGraph::ToJson(UnrealCodexGraph::NodeResult(Node));
+    }
 
     UBlueprint* Blueprint = UnrealCodexGraph::LoadBlueprint(BlueprintPath, ErrorMessage);
     UEdGraph* Graph = Blueprint ? UnrealCodexGraph::FindGraph(Blueprint, GraphName, ErrorMessage) : nullptr;
@@ -258,15 +401,107 @@ FString UUnrealCodexGraphLibrary::AddNode(
         return UnrealCodexGraph::Error(ErrorMessage);
     }
 
+    if (NodeKind.Equals(TEXT("variable_get"), ESearchCase::IgnoreCase) ||
+        NodeKind.Equals(TEXT("variable_set"), ESearchCase::IgnoreCase))
+    {
+        FString VariableName;
+        if (!Parameters->TryGetStringField(TEXT("variable_name"), VariableName) || VariableName.IsEmpty())
+        {
+            return UnrealCodexGraph::Error(TEXT("Variable nodes require variable_name"));
+        }
+        const bool bForSet = NodeKind.Equals(TEXT("variable_set"), ESearchCase::IgnoreCase);
+        if (!UnrealCodexGraph::ValidateVariableAccess(Blueprint, VariableName, bForSet, ErrorMessage))
+        {
+            return UnrealCodexGraph::Error(ErrorMessage);
+        }
+    }
+
+    if (NodeKind.Equals(TEXT("operator"), ESearchCase::IgnoreCase))
+    {
+        FString OwnerClassPath;
+        FString FunctionName;
+        if (!Parameters->TryGetStringField(TEXT("owner_class"), OwnerClassPath) ||
+            !Parameters->TryGetStringField(TEXT("function"), FunctionName))
+        {
+            return UnrealCodexGraph::Error(TEXT("operator requires owner_class and function"));
+        }
+        if (OwnerClassPath != TEXT("/Script/Engine.KismetMathLibrary") || FunctionName != TEXT("Add_IntInt"))
+        {
+            return UnrealCodexGraph::Error(TEXT("Unsupported operator: only /Script/Engine.KismetMathLibrary.Add_IntInt is available"));
+        }
+        UClass* OperatorClass = LoadObject<UClass>(nullptr, *OwnerClassPath);
+        if (!OperatorClass || OperatorClass->GetPathName() != OwnerClassPath)
+        {
+            return UnrealCodexGraph::Error(TEXT("Operator owner class not found: /Script/Engine.KismetMathLibrary"));
+        }
+        if (!OperatorClass->FindFunctionByName(FName(*FunctionName)))
+        {
+            return UnrealCodexGraph::Error(TEXT("Operator function not found: /Script/Engine.KismetMathLibrary.Add_IntInt"));
+        }
+    }
+
+    if (!NodeKind.Equals(TEXT("custom_event"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("branch"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("sequence"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("reroute"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("self"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("variable_get"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("variable_set"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("dynamic_cast"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("struct_make"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("struct_break"), ESearchCase::IgnoreCase) &&
+        !NodeKind.Equals(TEXT("operator"), ESearchCase::IgnoreCase))
+    {
+        return UnrealCodexGraph::Error(FString::Printf(TEXT("Unsupported node kind: %s"), *NodeKind));
+    }
+    FString StructPath;
+    UScriptStruct* StructType = nullptr;
+    if (NodeKind.Equals(TEXT("struct_make"), ESearchCase::IgnoreCase) ||
+        NodeKind.Equals(TEXT("struct_break"), ESearchCase::IgnoreCase))
+    {
+        if (!Parameters->TryGetStringField(TEXT("struct_path"), StructPath) || StructPath.IsEmpty())
+        {
+            return UnrealCodexGraph::Error(TEXT("Struct nodes require struct_path"));
+        }
+        StructType = LoadObject<UScriptStruct>(nullptr, *StructPath);
+        if (!StructType)
+        {
+            return UnrealCodexGraph::Error(FString::Printf(TEXT("Struct not found: %s"), *StructPath));
+        }
+    }
+    if (NodeKind.Equals(TEXT("dynamic_cast"), ESearchCase::IgnoreCase))
+    {
+        FString TargetClassPath;
+        if (!Parameters->TryGetStringField(TEXT("target_class"), TargetClassPath))
+        {
+            return UnrealCodexGraph::Error(TEXT("dynamic_cast requires target_class"));
+        }
+        if (!UnrealCodexGraph::LoadOwnerClass(TargetClassPath, ErrorMessage))
+        {
+            return UnrealCodexGraph::Error(ErrorMessage);
+        }
+    }
     const FScopedTransaction Transaction(NSLOCTEXT("UnrealCodexGraph", "AddNode", "Add Blueprint graph node"));
     Blueprint->Modify();
     Graph->Modify();
     UEdGraphNode* Node = nullptr;
-
-    if (NodeKind.Equals(TEXT("branch"), ESearchCase::IgnoreCase))
+    if (NodeKind.Equals(TEXT("operator"), ESearchCase::IgnoreCase))
+    {
+        UClass* OperatorClass = LoadObject<UClass>(nullptr, TEXT("/Script/Engine.KismetMathLibrary"));
+        UFunction* OperatorFunction = OperatorClass ? OperatorClass->FindFunctionByName(FName(TEXT("Add_IntInt"))) : nullptr;
+        FGraphNodeCreator<UK2Node_CommutativeAssociativeBinaryOperator> Creator(*Graph);
+        UK2Node_CommutativeAssociativeBinaryOperator* OperatorNode = Creator.CreateNode();
+        OperatorNode->SetFromFunction(OperatorFunction);
+        OperatorNode->NodePosX = FMath::RoundToInt(Position.X);
+        OperatorNode->NodePosY = FMath::RoundToInt(Position.Y);
+        Creator.Finalize();
+        Node = OperatorNode;
+    }
+    else if (NodeKind.Equals(TEXT("branch"), ESearchCase::IgnoreCase))
     {
         Node = UnrealCodexGraph::CreateNode<UK2Node_IfThenElse>(Graph, Position);
     }
+
     else if (NodeKind.Equals(TEXT("sequence"), ESearchCase::IgnoreCase))
     {
         Node = UnrealCodexGraph::CreateNode<UK2Node_ExecutionSequence>(Graph, Position);
@@ -283,10 +518,7 @@ FString UUnrealCodexGraphLibrary::AddNode(
              NodeKind.Equals(TEXT("variable_set"), ESearchCase::IgnoreCase))
     {
         FString VariableName;
-        if (!Parameters->TryGetStringField(TEXT("variable_name"), VariableName) || VariableName.IsEmpty())
-        {
-            return UnrealCodexGraph::Error(TEXT("Variable nodes require variable_name"));
-        }
+        Parameters->TryGetStringField(TEXT("variable_name"), VariableName);
         if (NodeKind.Equals(TEXT("variable_get"), ESearchCase::IgnoreCase))
         {
             FGraphNodeCreator<UK2Node_VariableGet> Creator(*Graph);
@@ -311,15 +543,8 @@ FString UUnrealCodexGraphLibrary::AddNode(
     else if (NodeKind.Equals(TEXT("dynamic_cast"), ESearchCase::IgnoreCase))
     {
         FString TargetClassPath;
-        if (!Parameters->TryGetStringField(TEXT("target_class"), TargetClassPath))
-        {
-            return UnrealCodexGraph::Error(TEXT("dynamic_cast requires target_class"));
-        }
+        Parameters->TryGetStringField(TEXT("target_class"), TargetClassPath);
         UClass* TargetClass = UnrealCodexGraph::LoadOwnerClass(TargetClassPath, ErrorMessage);
-        if (!TargetClass)
-        {
-            return UnrealCodexGraph::Error(ErrorMessage);
-        }
         FGraphNodeCreator<UK2Node_DynamicCast> Creator(*Graph);
         UK2Node_DynamicCast* CastNode = Creator.CreateNode();
         CastNode->TargetType = TargetClass;
@@ -328,9 +553,25 @@ FString UUnrealCodexGraphLibrary::AddNode(
         Creator.Finalize();
         Node = CastNode;
     }
-    else
+    else if (NodeKind.Equals(TEXT("struct_make"), ESearchCase::IgnoreCase))
     {
-        return UnrealCodexGraph::Error(FString::Printf(TEXT("Unsupported node kind: %s"), *NodeKind));
+        FGraphNodeCreator<UK2Node_MakeStruct> Creator(*Graph);
+        UK2Node_MakeStruct* StructNode = Creator.CreateNode();
+        StructNode->StructType = StructType;
+        StructNode->NodePosX = FMath::RoundToInt(Position.X);
+        StructNode->NodePosY = FMath::RoundToInt(Position.Y);
+        Creator.Finalize();
+        Node = StructNode;
+    }
+    else if (NodeKind.Equals(TEXT("struct_break"), ESearchCase::IgnoreCase))
+    {
+        FGraphNodeCreator<UK2Node_BreakStruct> Creator(*Graph);
+        UK2Node_BreakStruct* StructNode = Creator.CreateNode();
+        StructNode->StructType = StructType;
+        StructNode->NodePosX = FMath::RoundToInt(Position.X);
+        StructNode->NodePosY = FMath::RoundToInt(Position.Y);
+        Creator.Finalize();
+        Node = StructNode;
     }
 
     if (!Node)
@@ -339,6 +580,7 @@ FString UUnrealCodexGraphLibrary::AddNode(
     }
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
     return UnrealCodexGraph::ToJson(UnrealCodexGraph::NodeResult(Node));
+
 }
 
 FString UUnrealCodexGraphLibrary::InspectGraph(const FString& BlueprintPath, const FString& GraphName)
@@ -401,6 +643,7 @@ FString UUnrealCodexGraphLibrary::InspectGraph(const FString& BlueprintPath, con
         Nodes.Add(MakeShared<FJsonValueObject>(NodeJson));
     }
 
+
     const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetBoolField(TEXT("success"), true);
     Result->SetStringField(TEXT("blueprint"), BlueprintPath);
@@ -408,6 +651,75 @@ FString UUnrealCodexGraphLibrary::InspectGraph(const FString& BlueprintPath, con
     Result->SetArrayField(TEXT("nodes"), Nodes);
     return UnrealCodexGraph::ToJson(Result);
 }
+FString UUnrealCodexGraphLibrary::DescribeGraph(const FString& BlueprintPath, const FString& GraphName)
+{
+    FString ErrorMessage;
+    UBlueprint* Blueprint = UnrealCodexGraph::LoadBlueprint(BlueprintPath, ErrorMessage);
+    if (!Blueprint)
+    {
+        return UnrealCodexGraph::ToJson(CatalogError(TEXT("blueprint_not_found"), ErrorMessage));
+    }
+    UEdGraph* Graph = UnrealCodexGraph::FindGraph(Blueprint, GraphName, ErrorMessage);
+    if (!Graph)
+    {
+        return UnrealCodexGraph::ToJson(CatalogError(TEXT("graph_not_found"), ErrorMessage));
+    }
+    const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("blueprint"), BlueprintPath);
+    Result->SetStringField(TEXT("graph"), Graph->GetName());
+    Result->SetNumberField(TEXT("node_count"), Graph->Nodes.Num());
+    Result->SetStringField(TEXT("parent_class"), Blueprint->ParentClass ? Blueprint->ParentClass->GetPathName() : FString());
+    Result->SetStringField(TEXT("generated_class"), Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetPathName() : FString());
+    return UnrealCodexGraph::ToJson(Result);
+}
+FString UUnrealCodexGraphLibrary::SearchNodeSpecs(const FString& BlueprintPath, const FString& GraphName, const FString& Query)
+{
+    FString ErrorMessage;
+    UBlueprint* Blueprint = UnrealCodexGraph::LoadBlueprint(BlueprintPath, ErrorMessage);
+    if (!Blueprint)
+    {
+        return UnrealCodexGraph::ToJson(CatalogError(TEXT("blueprint_not_found"), ErrorMessage));
+    }
+    if (!UnrealCodexGraph::FindGraph(Blueprint, GraphName, ErrorMessage))
+    {
+        return UnrealCodexGraph::ToJson(CatalogError(TEXT("graph_not_found"), ErrorMessage));
+    }
+    TArray<TSharedPtr<FJsonValue>> Matches;
+    for (const TSharedRef<FJsonObject>& Spec : CatalogNodeSpecs())
+    {
+        const FString Haystack = Spec->GetStringField(TEXT("kind")) + TEXT(" ") + Spec->GetStringField(TEXT("title"));
+        if (Query.IsEmpty() || Haystack.Contains(Query, ESearchCase::IgnoreCase))
+        {
+            Matches.Add(MakeShared<FJsonValueObject>(Spec));
+        }
+    }
+    const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("blueprint"), BlueprintPath);
+    Result->SetStringField(TEXT("graph"), GraphName);
+    Result->SetStringField(TEXT("query"), Query);
+    Result->SetArrayField(TEXT("matches"), Matches);
+    Result->SetNumberField(TEXT("total"), Matches.Num());
+    Result->SetBoolField(TEXT("ambiguous"), Matches.Num() > 1);
+    return UnrealCodexGraph::ToJson(Result);
+}
+
+FString UUnrealCodexGraphLibrary::DescribeNodeSpec(const FString& NodeKind)
+{
+    for (const TSharedRef<FJsonObject>& Spec : CatalogNodeSpecs())
+    {
+        if (Spec->GetStringField(TEXT("kind")).Equals(NodeKind, ESearchCase::IgnoreCase))
+        {
+            const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+            Result->SetBoolField(TEXT("success"), true);
+            Result->SetObjectField(TEXT("node_spec"), Spec);
+            return UnrealCodexGraph::ToJson(Result);
+        }
+    }
+    return UnrealCodexGraph::ToJson(CatalogError(TEXT("node_kind_not_found"), FString::Printf(TEXT("Unsupported node kind: %s"), *NodeKind)));
+}
+
 
 FString UUnrealCodexGraphLibrary::ListGraphs(const FString& BlueprintPath)
 {
@@ -598,5 +910,103 @@ FString UUnrealCodexGraphLibrary::SetPinDefaultValue(
     Result->SetStringField(TEXT("node_guid"), NodeGuid);
     Result->SetStringField(TEXT("pin"), PinName);
     Result->SetStringField(TEXT("value"), Value);
+    return UnrealCodexGraph::ToJson(Result);
+}
+
+FString UUnrealCodexGraphLibrary::RemoveNode(
+    const FString& BlueprintPath, const FString& GraphName, const FString& NodeGuid
+)
+{
+    FString ErrorMessage;
+    UBlueprint* Blueprint = UnrealCodexGraph::LoadBlueprint(BlueprintPath, ErrorMessage);
+    UEdGraph* Graph = Blueprint ? UnrealCodexGraph::FindGraph(Blueprint, GraphName, ErrorMessage) : nullptr;
+    UEdGraphNode* Node = Graph ? UnrealCodexGraph::FindNode(Graph, NodeGuid, ErrorMessage) : nullptr;
+    if (!Node)
+    {
+        return UnrealCodexGraph::Error(ErrorMessage);
+    }
+    const FScopedTransaction Transaction(NSLOCTEXT("UnrealCodexGraph", "RemoveNode", "Remove Blueprint graph node"));
+    Blueprint->Modify();
+    Graph->Modify();
+    Node->Modify();
+    Graph->RemoveNode(Node);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("node_guid"), NodeGuid);
+    return UnrealCodexGraph::ToJson(Result);
+}
+
+FString UUnrealCodexGraphLibrary::DisconnectPins(
+    const FString& BlueprintPath, const FString& GraphName,
+    const FString& FromNodeGuid, const FString& FromPinName,
+    const FString& ToNodeGuid, const FString& ToPinName, bool bAllLinks
+)
+{
+    FString ErrorMessage;
+    UBlueprint* Blueprint = UnrealCodexGraph::LoadBlueprint(BlueprintPath, ErrorMessage);
+    UEdGraph* Graph = Blueprint ? UnrealCodexGraph::FindGraph(Blueprint, GraphName, ErrorMessage) : nullptr;
+    UEdGraphNode* FromNode = Graph ? UnrealCodexGraph::FindNode(Graph, FromNodeGuid, ErrorMessage) : nullptr;
+    UEdGraphPin* FromPin = nullptr;
+    UEdGraphPin* ToPin = nullptr;
+    if (FromNode && bAllLinks)
+    {
+        for (UEdGraphPin* Candidate : FromNode->Pins)
+        {
+            if (Candidate && UnrealCodexGraph::NormalizePinName(Candidate->PinName.ToString()) ==
+                UnrealCodexGraph::NormalizePinName(FromPinName))
+            {
+                FromPin = Candidate;
+                break;
+            }
+        }
+        if (!FromPin)
+        {
+            ErrorMessage = FString::Printf(TEXT("Pin not found on node %s: %s"), *FromNodeGuid, *FromPinName);
+        }
+    }
+    else if (FromNode)
+    {
+        UEdGraphNode* ToNode = UnrealCodexGraph::FindNode(Graph, ToNodeGuid, ErrorMessage);
+        FromPin = ToNode ? UnrealCodexGraph::FindPin(FromNode, FromPinName, EGPD_Output, ErrorMessage) : nullptr;
+        ToPin = FromPin ? UnrealCodexGraph::FindPin(ToNode, ToPinName, EGPD_Input, ErrorMessage) : nullptr;
+    }
+    if (!FromPin || (!bAllLinks && !ToPin))
+    {
+        return UnrealCodexGraph::Error(ErrorMessage);
+    }
+    if (bAllLinks && FromPin->LinkedTo.IsEmpty())
+    {
+        return UnrealCodexGraph::Error(TEXT("Pin has no links to disconnect"));
+    }
+    if (!bAllLinks && !FromPin->LinkedTo.Contains(ToPin))
+    {
+        return UnrealCodexGraph::Error(TEXT("Specified pins are not connected"));
+    }
+    const FScopedTransaction Transaction(NSLOCTEXT("UnrealCodexGraph", "DisconnectPins", "Disconnect Blueprint pins"));
+    Blueprint->Modify();
+    Graph->Modify();
+    FromPin->Modify();
+    if (bAllLinks)
+    {
+        const TArray<UEdGraphPin*> LinkedPins = FromPin->LinkedTo;
+        for (UEdGraphPin* LinkedPin : LinkedPins)
+        {
+            if (LinkedPin)
+            {
+                LinkedPin->Modify();
+                GetDefault<UEdGraphSchema_K2>()->BreakPinLinks(*FromPin, true);
+            }
+        }
+    }
+    else
+    {
+        ToPin->Modify();
+        GetDefault<UEdGraphSchema_K2>()->BreakSinglePinLink(FromPin, ToPin);
+    }
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetBoolField(TEXT("all"), bAllLinks);
     return UnrealCodexGraph::ToJson(Result);
 }

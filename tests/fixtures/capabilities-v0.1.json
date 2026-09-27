@@ -1,38 +1,17 @@
 {
   "harness_version": "0.1.0",
   "actions": [
-    "asset.inspect",
-    "blueprint.compile",
-    "blueprint.create",
-    "blueprint.edit",
-    "blueprint.graph.add_node",
-    "blueprint.graph.connect",
-    "blueprint.graph.inspect",
-    "blueprint.graph.set_pin_value",
-    "blueprint.inspect",
-    "content.create_folder",
-    "content.list",
-    "level.inspect",
-    "level.set_actor_property",
-    "level.set_actor_transform",
-    "level.spawn_actor",
-    "material.create",
-    "material.inspect",
-    "material_instance.create",
-    "material_instance.set_parameters",
-    "project.save",
-    "system.capabilities",
-    "system.describe_actions"
+    "asset.create", "asset.describe_types", "asset.duplicate", "asset.inspect", "asset.save", "asset.search",
+    "backend.capabilities", "backend.describe", "backend.operation",
+    "blueprint.compile", "blueprint.create", "blueprint.edit", "blueprint.graph.add_node", "blueprint.graph.connect", "blueprint.graph.disconnect", "blueprint.graph.inspect", "blueprint.graph.remove_node", "blueprint.graph.set_pin_value", "blueprint.inspect",
+    "content.create_folder", "content.list",
+    "graph.describe", "graph.describe_node", "graph.search_nodes",
+    "level.inspect", "level.set_actor_property", "level.set_actor_transform", "level.spawn_actor",
+    "material.create", "material.inspect", "material_instance.create", "material_instance.set_parameters",
+    "object.call", "object.describe", "object.describe_functions", "object.inspect", "object.set",
+    "project.save", "recipe.execute", "recipe.validate", "system.capabilities", "system.describe_actions"
   ],
   "graph_node_kinds": [
-    "function_call",
-    "event",
-    "branch",
-    "sequence",
-    "reroute",
-    "self",
-    "variable_get",
-    "variable_set",
-    "dynamic_cast"
+    "function_call", "event", "operator", "custom_event", "branch", "sequence", "reroute", "self", "variable_get", "variable_set", "dynamic_cast", "struct_make", "struct_break"
   ]
 }
