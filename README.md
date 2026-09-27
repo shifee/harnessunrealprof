@@ -1,289 +1,453 @@
-# Unreal Codex Harness
+# Unreal Harness
 
-A portable, safety-focused JSON automation layer and project-local Codex Skill for Unreal Engine 5.8. It watches `Content/Python/actions.json`, validates the whole batch before mutation, executes supported editor operations serially, and atomically writes a structured `result.json` audit record.
+Безопасный JSON-harness для Unreal Engine 5.8. Он позволяет отправлять в открытый Unreal Editor декларативные команды: инспектировать уровень и ассеты, создавать материалы и Blueprint, редактировать поддержанные графы, размещать акторов и сохранять изменения.
 
-This project targets Unreal Engine **5.8**. UE 5.7 is no longer supported.
+Harness **не является твоей игрой и не заменяет твой Git-репозиторий**. Есть два отдельных репозитория:
 
-## Design
-
-- Deterministic JSON batches with dependencies, dry-run plans, bounded output, and stable result envelopes.
-- Declarative `$repeat`, `$mirror`, and `$grid` recipe expansion with `fail`, `reuse`, and `update` conflict modes.
-- Editor Undo transactions for mutating actions.
-- Inspection-first asset, Blueprint, graph, material, and level workflows.
-- A small C++ graph bridge for K2 functionality that Unreal Python does not expose reliably.
-- No arbitrary Python, shell execution, asset deletion, or silent Blueprint replacement.
-- Optional coexistence with UE 5.8's built-in experimental Unreal MCP server.
-
-The design review behind v0.1 is documented in [docs/IMPLEMENTATION_RESEARCH.md](docs/IMPLEMENTATION_RESEARCH.md).
-
-The accepted long-term structure is a universal reflection/asset/graph core with capability discovery, declarative recipes, and backend adapters for specialized Unreal subsystems. See [target architecture](docs/TARGET_ARCHITECTURE.md) and the staged [technical roadmap](docs/ROADMAP.md).
-
-## Requirements
-
-- Unreal Engine 5.8.
-- An existing project with one `.uproject` in its root.
-- Unreal plugins `PythonScriptPlugin`, `EditorScriptingUtilities`, and the installed `UnrealCodexGraph` project plugin.
-- Python 3.9+ for the installer and validator; they use only the standard library.
-- A UE 5.8-supported C++ toolchain to build the graph bridge (Visual Studio 2022 on Windows).
-- Codex opened at the Unreal project root for project-local skill discovery.
-
-The optional native MCP integration uses the UE 5.8 `ModelContextProtocol` and `AllToolsets` plugins. Unreal MCP is experimental and listens on loopback without authentication by default; do not expose it to a network.
-
-## Install
-
-```powershell
-git clone https://github.com/shifee/unreal_harness.git
-cd unreal_harness
-py scripts/install.py --project "C:/Path/Project/Project.uproject"
+```text
+unreal_harness/       технический harness, CLI, installer и launcher
+MyShooter/            твой Unreal-проект, его .uproject и Content/
 ```
 
-Project discovery and safe update modes:
+`unreal_harness` устанавливается в `MyShooter`, но не требует переносить игру в репозиторий harness.
+
+## Что умеет harness
+
+- принимает полные JSON-документы через `Content/Python/actions.json`;
+- валидирует весь batch до изменения проекта;
+- выполняет команды последовательно и поддерживает зависимости;
+- делает dry-run и пишет audit-результат в `Content/Python/result.json`;
+- работает через Undo-транзакции Unreal;
+- не предоставляет произвольный Python, shell, удаление ассетов или unrestricted `ProcessEvent`;
+- поддерживает детерминированный CLI без LLM;
+- может использовать LLM только как planner, который генерирует JSON-план.
+
+Поддерживается **Unreal Engine 5.8**. UE 5.7 не поддерживается.
+
+## Установка на Windows
+
+### Шаг 1. Установить внешние зависимости
+
+На Windows-машине должны быть установлены:
+
+1. Unreal Engine 5.8.
+2. Visual Studio 2022 с workload **Game development with C++**.
+3. Python 3.9 или новее.
+4. Git.
+5. Видеодрайвер.
+6. Ollama, vLLM или доступ к hosted API — только если нужен режим с LLM.
+
+Проверка:
 
 ```powershell
-py scripts/install.py
-py scripts/install.py --project-dir "C:/Path/Project"
-py scripts/install.py --dry-run --project "C:/Path/Project/Project.uproject"
-py scripts/install.py --force --project "C:/Path/Project/Project.uproject"
+py --version
+git --version
 ```
 
-Without an explicit path, the installer checks the current directory, its parents, and a depth-limited subtree. It never scans a whole drive. Existing files are skipped; `--force` creates timestamped sibling backups before replacement.
+Unreal Engine и Visual Studio не устанавливаются этим репозиторием.
 
-To let the installer enable the required plugins (with a `.uproject` backup):
+### Шаг 2. Клонировать свой Unreal-проект
+
+Если проект уже находится в Git:
 
 ```powershell
-py scripts/install.py --project "C:/Path/Project/Project.uproject" --enable-plugins
+cd D:\Projects
+git clone <URL_ТВОЕГО_РЕПОЗИТОРИЯ> MyShooter
 ```
 
-To additionally enable UE 5.8's native MCP server and default toolsets:
+В корне должны находиться, например:
 
-```powershell
-py scripts/install.py --project "C:/Path/Project/Project.uproject" --enable-native-mcp
+```text
+D:\Projects\MyShooter\MyShooter.uproject
+D:\Projects\MyShooter\Content\
 ```
 
-You can also enable plugins manually in **Edit → Plugins**. Restart Unreal after changing plugins.
+Если проект уже существует локально, этот шаг не нужен. Не добавляй в Git generated-каталоги Unreal:
 
-## One-command Windows launcher
+```text
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+```
 
-В репозитории есть `run.ps1`. Он устанавливает harness в указанный проект, валидирует установку, запускает Unreal Editor и выполняет read-only `capabilities`:
+### Шаг 3. Клонировать harness отдельно
 
 ```powershell
+cd D:\Tools
+git clone <URL_РЕПОЗИТОРИЯ_HARNESS> unreal_harness
+cd D:\Tools\unreal_harness
+```
+
+`<URL_РЕПОЗИТОРИЯ_HARNESS>` — URL этого harness-репозитория. Это **не** URL твоего Unreal-проекта.
+
+Если harness уже скачан, достаточно:
+
+```powershell
+cd D:\Tools\unreal_harness
+git pull
+```
+
+## Упрощённый запуск одной командой
+
+В harness уже есть `run.ps1`. Он принимает путь к **твоему** `.uproject`, устанавливает в него harness, валидирует файлы, запускает Unreal Editor и делает первую read-only проверку.
+
+Из PowerShell:
+
+```powershell
+cd D:\Tools\unreal_harness
 Set-ExecutionPolicy -Scope Process Bypass
-.run.ps1 -Project "D:\Projects\MyShooter\MyShooter.uproject"
+.\run.ps1 -Project "D:\Projects\MyShooter\MyShooter.uproject"
 ```
 
-Путь к Editor можно передать явно или задать через `UNREAL_EDITOR`:
+Что делает команда:
+
+1. находит твой `.uproject`;
+2. копирует Python harness, plugin и skill-файлы в твой проект;
+3. включает требуемые plugins в `.uproject` с backup;
+4. запускает validator;
+5. находит `UnrealEditor.exe`;
+6. запускает проект;
+7. ждёт загрузки Editor;
+8. отправляет `system.capabilities`;
+9. печатает JSON-результат.
+
+По умолчанию launcher ищет Editor здесь:
+
+```text
+C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe
+C:\Program Files\Epic Games\UE_5.8.3\Engine\Binaries\Win64\UnrealEditor.exe
+```
+
+Если Unreal установлен в другом месте:
 
 ```powershell
 .\run.ps1 `
   -Project "D:\Projects\MyShooter\MyShooter.uproject" `
-  -EditorPath "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"
+  -EditorPath "D:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe"
 ```
 
-После проверки запуска можно сразу передать prompt. Для Ollama/vLLM/hosted API endpoint и model передаются в CLI:
+Или один раз задай переменную:
+
+```powershell
+$env:UNREAL_EDITOR = "D:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe"
+.\run.ps1 -Project "D:\Projects\MyShooter\MyShooter.uproject"
+```
+
+После загрузки проекта в Output Log должна появиться строка:
+
+```text
+[AI WATCHER] Watcher started
+```
+
+Если Unreal попросит собрать plugin или перезапустить Editor, согласись и запусти `run.ps1` повторно.
+
+## Повторный запуск без установки и второго Editor
+
+После первого успешного запуска Unreal Editor уже открыт. Для следующих команд используй:
+
+```powershell
+.\run.ps1 `
+  -Project "D:\Projects\MyShooter\MyShooter.uproject" `
+  -NoInstall `
+  -NoEditor
+```
+
+Это повторно проверит capabilities через уже открытый Editor.
+
+Флаги launcher:
+
+```text
+-NoInstall          не копировать harness повторно
+-NoEditor           не запускать второй Unreal Editor
+-SkipValidation     пропустить проверку установленных файлов
+-EnableNativeMcp    дополнительно включить экспериментальный UE MCP
+-EditorPath PATH    явно указать UnrealEditor.exe
+-Python COMMAND     заменить py на python или другой launcher
+-Timeout SECONDS    timeout запуска и CLI
+```
+
+## Ручная установка без launcher
+
+Если нужен пошаговый контроль, из каталога harness выполни:
+
+```powershell
+py scripts\install.py `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --enable-plugins
+```
+
+Проверка без запуска Unreal:
+
+```powershell
+py scripts\validate_install.py "D:\Projects\MyShooter"
+```
+
+Безопасный предварительный просмотр изменений:
+
+```powershell
+py scripts\install.py `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --dry-run
+```
+
+`--force` заменяет существующие файлы, предварительно создавая timestamped backup:
+
+```powershell
+py scripts\install.py `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --enable-plugins `
+  --force
+```
+
+`--enable-native-mcp` необязателен. Для текущего JSON CLI он не требуется:
+
+```powershell
+py scripts\install.py `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --enable-plugins `
+  --enable-native-mcp
+```
+
+## Проверка CLI без LLM
+
+После того как в Output Log появился watcher:
+
+```powershell
+py -m unreal_harness capabilities `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --timeout 60
+```
+
+Инспекция уровня:
+
+```powershell
+py -m unreal_harness inspect-level `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --limit 100 `
+  --timeout 60
+```
+
+Список ассетов:
+
+```powershell
+py -m unreal_harness list-assets `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --path /Game `
+  --recursive `
+  --limit 100 `
+  --timeout 60
+```
+
+Пример мутации:
+
+```powershell
+py -m unreal_harness spawn-actor `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --class "/Game/AI/BP_Enemy.BP_Enemy_C" `
+  --location '[100, 200, 0]' `
+  --actor-label Enemy_01 `
+  --save `
+  --timeout 60
+```
+
+Доступные deterministic-команды:
+
+```text
+capabilities
+inspect-level
+list-assets
+spawn-actor
+create-blueprint
+create-material
+set-property
+run-json
+```
+
+Для простых операций LLM не нужна вообще.
+
+## Запуск LLM-агента
+
+Команда `ask` использует модель только для построения плана. Модель не получает shell, Python или прямой доступ к Unreal.
+
+Поток выполнения:
+
+```text
+prompt
+  -> LLM генерирует JSON plan
+  -> проверка JSON и action allowlist
+  -> AgentRun получает capabilities
+  -> dry-run
+  -> execute
+  -> result.json
+```
+
+### Ollama
+
+Установи Ollama отдельно и проверь:
+
+```powershell
+ollama --version
+ollama list
+ollama pull <имя-модели>
+```
+
+Запусти сервер, если он не запущен как служба:
+
+```powershell
+ollama serve
+```
+
+Настрой endpoint:
 
 ```powershell
 $env:UNREAL_HARNESS_LLM_ENDPOINT = "http://127.0.0.1:11434/v1"
-$env:UNREAL_HARNESS_LLM_MODEL = "qwen3:14b"
+$env:UNREAL_HARNESS_LLM_MODEL = "<точное-имя-модели-из-ollama-list>"
+```
 
+Первый prompt через launcher:
+
+```powershell
 .\run.ps1 `
   -Project "D:\Projects\MyShooter\MyShooter.uproject" `
-  -Prompt "Создай базовый Blueprint BP_TestActor в /Game/Test и сохрани его" `
+  -NoInstall `
+  -NoEditor `
+  -Prompt "Проинспектируй текущий уровень и перечисли найденные акторы" `
   -Model $env:UNREAL_HARNESS_LLM_MODEL `
   -Endpoint $env:UNREAL_HARNESS_LLM_ENDPOINT `
   -Timeout 120
 ```
 
-Полезные флаги: `-NoInstall` не повторяет установку, `-NoEditor` не запускает второй Editor, `-SkipValidation` пропускает проверку файлов, `-EnableNativeMcp` включает экспериментальный native MCP. Первый запуск лучше делать без этих флагов. Launcher не может автоматически установить Unreal Engine или модель: это внешние зависимости, требующие отдельной установки и выбора версии/веса.
+### vLLM
 
-## First run
+vLLM должен работать как OpenAI-compatible server. Например:
 
-1. Open the project in UE 5.8 and allow the `UnrealCodexGraph` Editor plugin to build if prompted.
-2. In **Window → Developer Tools → Output Log**, confirm:
-
-   ```text
-   [AI WATCHER] Watcher started
-   ```
-
-3. Open the project root in Codex and try:
-
-   ```text
-   Use $unreal-game-builder to inspect the current level, place three instances of an existing Blueprint actor in a row, and save the level.
-   ```
-
-The watcher treats the existing `actions.json` as already seen at startup. A client must write a new complete document to trigger execution.
-
-## CLI
-
-Для фиксированных операций модель не нужна. CLI формирует безопасный JSON-документ и отправляет его в открытый Unreal Editor:
-
-```bash
-python -m unreal_harness capabilities --project /path/to/Game.uproject
-python -m unreal_harness inspect-level --project /path/to/Game.uproject --limit 100
-python -m unreal_harness list-assets --project /path/to/Game.uproject --path /Game/AI --recursive
-python -m unreal_harness spawn-actor \
-  --project /path/to/Game.uproject \
-  --class /Game/AI/BP_Enemy.BP_Enemy_C \
-  --location '[100, 200, 0]' \
-  --actor-label Enemy_01 \
-  --save
+```powershell
+vllm serve <model-name> --host 127.0.0.1 --port 8000
 ```
 
-Доступны команды `capabilities`, `inspect-level`, `list-assets`, `spawn-actor`, `create-blueprint`, `create-material`, `set-property` и `run-json`. CLI не редактирует `.uasset`/`.umap` напрямую: все операции проходят через `actions.json`, executor и audit `result.json`.
+Затем:
 
-Для естественного языка есть команда `ask`. Она использует модель только как planner: модель возвращает declarative JSON-план, после чего harness сам выполняет `capabilities -> dry-run -> execute`. Модель не получает shell/Python-доступ и не вызывает Unreal напрямую.
-
-```bash
-export UNREAL_HARNESS_LLM_MODEL=qwen2.5:14b
-python -m unreal_harness ask \
-  --project /path/to/Game.uproject \
-  "Создай Blueprint BP_Enemy в /Game/AI и сохрани его"
+```powershell
+$env:UNREAL_HARNESS_LLM_ENDPOINT = "http://127.0.0.1:8000/v1"
+$env:UNREAL_HARNESS_LLM_MODEL = "<model-name>"
 ```
 
-По умолчанию `ask` подключается к OpenAI-compatible endpoint `http://127.0.0.1:11434/v1`, поэтому подходит для Ollama. Для vLLM или hosted API укажи endpoint и ключ:
+### Hosted OpenAI-compatible API
 
-```bash
-python -m unreal_harness ask \
-  --project /path/to/Game.uproject \
-  --endpoint https://api.example.com/v1 \
-  --model provider/model-name \
-  --api-key "$PROVIDER_API_KEY" \
-  "Проинспектируй уровень и перечисли найденные акторы"
+```powershell
+$env:UNREAL_HARNESS_LLM_ENDPOINT = "https://api.example.com/v1"
+$env:UNREAL_HARNESS_LLM_MODEL = "provider/model-name"
+$env:UNREAL_HARNESS_LLM_API_KEY = "<api-key>"
 ```
 
-Практичный выбор: Ollama для локальной работы и приватности, vLLM для собственного GPU-сервера и throughput, hosted OpenAI-compatible API для лучшего качества планирования. Для простых операций модель не нужна вообще.
+Запуск:
 
-## JSON contract
-
-```json
-{
-  "format_version": "1.0",
-  "dry_run": false,
-  "commands": [
-    {
-      "id": "inspect_level",
-      "action": "level.inspect",
-      "arguments": {"limit": 100}
-    }
-  ]
-}
+```powershell
+.\run.ps1 `
+  -Project "D:\Projects\MyShooter\MyShooter.uproject" `
+  -NoInstall `
+  -NoEditor `
+  -Prompt "Создай базовый Blueprint BP_TestActor в /Game/Test и сохрани его" `
+  -Model $env:UNREAL_HARNESS_LLM_MODEL `
+  -Endpoint $env:UNREAL_HARNESS_LLM_ENDPOINT `
+  -ApiKey $env:UNREAL_HARNESS_LLM_API_KEY `
+  -Timeout 120
 ```
 
-The executor rejects duplicate IDs, unknown actions, forward/missing dependencies, malformed arguments, and batches larger than 200 commands before any mutation occurs. `dry_run: true` returns the execution plan without running commands.
+Рекомендация:
 
-For repeated constructions, a top-level `recipes` array can generate ordinary commands and nested operation lists with `$repeat`, `$mirror`, and `$grid`. Recipe conflict modes make reruns explicit: `fail` rejects an existing destination, `reuse` keeps it, and `update` applies supported changes without creating duplicates. See `examples/patterned-castle.json` and the installed command reference for the exact schema.
+- Ollama — локально, приватно, проще всего на Windows;
+- vLLM — собственный GPU-сервер и throughput;
+- hosted API — обычно лучшее качество, но сеть, стоимость и передача контекста наружу.
 
-Supported families:
+## Как давать большие задачи
 
-- discovery: `system.capabilities`, `system.describe_actions`
-- content: `content.create_folder`, `content.list`
-- assets: `asset.inspect`, `asset.search`, `asset.describe_types`, `asset.duplicate`, `asset.save`
-- materials: `material.create`, `material.inspect`, `material_instance.create`, `material_instance.set_parameters`
-- Blueprints: `blueprint.create`, `blueprint.inspect`, `blueprint.compile`, `blueprint.edit`
-- graphs: inspect, add universal node kinds, connect, disconnect, remove nodes, set literal pin values
-- levels: inspect actors, spawn actors, set actor transforms and reflected properties
-- persistence: `project.save`
-
-Graph node kinds in v0.1 are `function_call`, `event`, `branch`, `sequence`, `reroute`, `self`, `variable_get`, `variable_set`, and `dynamic_cast`. Query `system.capabilities` rather than assuming the list.
-
-`blueprint.compile` now checks Unreal's actual `BlueprintStatus`: a graph rejected by the compiler returns `blueprint_compile_failed` instead of a false successful result.
-
-## Demonstrated capabilities
-
-The checked examples and UE 5.8 validation runs currently demonstrate:
-
-- `examples/numeric-blueprint.json`: create an Actor Blueprint, build `BeginPlay → Print String`, calculate `2 + 3`, connect exec/data pins, compile, save, and spawn it.
-- `examples/patterned-castle.json`: expand `$repeat`, `$mirror`, and `$grid`, create/update materials and components, and rerun without actor or component duplicates.
-- Blueprint showcase validation: a visible five-mesh Actor whose Event Graph uses `event`, function calls, two sequences, arithmetic, reroute, comparison, branch, self reference, dynamic cast, component variable get, automatic `int → string` conversion, and `SetVisibility`. The validated graph contains 21 nodes and 20 links and compiles as `BS_UP_TO_DATE`.
-
-In practical terms, the harness can inspect content and levels; create simple materials, Actor Blueprints, components, transforms, and level instances; assemble a useful subset of K2 graphs by reflected class/function names; set literal pins; connect compatible pins through Unreal's schema; compile and save assets; and compose repeated work through declarative recipes with explicit conflict handling.
-
-Current boundaries are equally important: there is no generic property codec, factory-driven `asset.create`, contextual Blueprint node catalog, complete recipe runtime, or JSON-controlled PIE session. `variable_set` now validates that the target property exists, is Blueprint-visible, and is not read-only, edit-const, or transient. Automatic metadata validation beyond graph variables remains scheduled for roadmap stage 1.
-
-See the installed `references/actions-schema.md` for exact shapes. `examples/numeric-blueprint.json` remains a complete graph example.
-
-## UE 5.8 native MCP
-
-The harness and native Unreal MCP serve different purposes:
-
-- the JSON harness is the deterministic batch, dependency, Undo, and audit layer;
-- native MCP is useful for interactive tool discovery and engine-provided toolsets.
-
-To configure native MCP, enable **Unreal MCP** and **All Toolsets**, enable Auto Start under Editor Preferences, then use the editor console:
+Не начинай с:
 
 ```text
-ModelContextProtocol.GenerateClientConfig Codex
+Сделай шутер.
 ```
 
-The default endpoint is `http://127.0.0.1:8000/mcp`. Unreal serializes tool execution on the game thread, so clients must not issue overlapping calls.
-
-## Validation
-
-```powershell
-py scripts/validate_install.py "C:/Path/Project"
-```
-
-Validation checks required files, JSON, Python syntax, skill frontmatter, action-reference drift, forbidden source-machine paths, and required plugins. It does not start Unreal Editor or change the project.
-
-For an end-to-end test in a dedicated UE 5.8 project, first install the current harness and close the interactive editor instance for that project, then run:
-
-```powershell
-py scripts/run_ue_smoke_test.py --project "C:/Path/TestProject/TestProject.uproject"
-```
-
-The smoke test checks the capability snapshot, creates a uniquely named material and Actor Blueprint, builds and compiles a BeginPlay → Print String graph, spawns the actor in the commandlet world, and verifies the mutation audit. Test assets are intentionally retained under `/Game/CodexHarnessSmoke/<run>` for inspection; the original `actions.json` and `result.json` are restored.
-
-Для локальной проверки можно создать чистый smoke-проект из шаблона:
-
-```bash
-python scripts/create_smoke_project.py /tmp/unreal-codex-smoke
-python scripts/validate_install.py /tmp/unreal-codex-smoke
-python scripts/run_ue_smoke_test.py \
-  --project /tmp/unreal-codex-smoke/UnrealCodexHarnessSmoke.uproject \
-  --editor-cmd /path/to/UE_5.8/Engine/Binaries/Linux/UnrealEditor-Cmd
-```
-
-Скрипт создаёт disposable-проект и не изменяет исходные файлы репозитория. Последняя команда требует реально установленный Unreal Engine 5.8; наличие `.uproject` само по себе не заменяет сборку и запуск Editor.
-
-## Install only the Codex Skill
+Используй последовательные задачи:
 
 ```text
-Use $skill-installer to install from https://github.com/shifee/unreal_harness/tree/main/.agents/skills/unreal-game-builder
+Проинспектируй проект и текущий уровень. Ничего не изменяй. Перечисли доступные ассеты и акторы.
 ```
 
-This installs only the instructions, not the Unreal Python harness or graph plugin. Use `scripts/install.py` for the complete integration.
+```text
+Создай базовый Actor Blueprint BP_Player в /Game/Shooter/Blueprints. Скомпилируй и сохрани.
+```
 
-## Update
+```text
+Создай Blueprint BP_Weapon в /Game/Shooter/Blueprints, используя только доступные actions и graph node kinds. Сначала выполни dry-run.
+```
+
+После каждого изменения проверяй состояние read-only командой. Один prompt не превращает пустой проект в гарантированно готовую игру: поддержанные actions ограничены, а сложный gameplay требует итераций.
+
+## Runtime-файлы и диагностика
+
+В пользовательском проекте harness использует:
+
+```text
+Content/Python/actions.json       входной JSON batch
+Content/Python/result.json        результат и audit
+Content/Python/execute_actions.py executor
+Content/Python/init_unreal.py     watcher/startup
+Plugins/UnrealCodexGraph/          graph bridge
+```
+
+При ошибке смотри:
+
+1. вывод CLI;
+2. Unreal Output Log;
+3. `Content/Python/result.json`;
+4. первый failed command и его error message;
+5. `changed_objects`.
+
+Ошибка:
+
+```text
+Timed out waiting for Unreal result.json
+```
+
+обычно означает, что Editor закрыт, watcher не запустился, проект установлен не тот или plugin ещё не собран. Сначала исправь `capabilities`; модель здесь не поможет.
+
+Если `result.json` не меняется:
+
+- проверь `[AI WATCHER] Watcher started`;
+- убедись, что открыт именно указанный `.uproject`;
+- проверь, что `actions.json` находится в `Content/Python` этого проекта;
+- перезапусти Editor после изменения plugins;
+- запусти `scripts/validate_install.py`.
+
+## Обновление harness
 
 ```powershell
+cd D:\Tools\unreal_harness
 git pull
-py scripts/install.py --project "C:/Path/Project/Project.uproject" --force
-py scripts/validate_install.py "C:/Path/Project"
+py scripts\install.py `
+  --project "D:\Projects\MyShooter\MyShooter.uproject" `
+  --enable-plugins `
+  --force
+py scripts\validate_install.py "D:\Projects\MyShooter"
 ```
 
-Review timestamped backups before removing them.
+Перед удалением timestamped backup-файлов проверь их содержимое.
 
-## Troubleshooting
+## Ограничения безопасности
 
-- No watcher message: confirm the required plugins are enabled, restart Unreal, and inspect the Output Log.
-- `result.json` does not change: make sure Unreal Editor is open and `actions.json` is valid JSON.
-- Graph bridge unavailable: rebuild the project plugin with UE 5.8, restart, then run `system.capabilities`.
-- Multiple projects found: pass the exact `.uproject` with `--project`.
-- Native MCP unavailable: check `LogModelContextProtocol`, confirm Auto Start, and keep the endpoint on loopback.
+Harness намеренно не предоставляет:
 
-## Safe removal
+- произвольное выполнение Python;
+- shell и запуск процессов из Unreal;
+- прямую запись `.uasset` и `.umap`;
+- удаление ассетов;
+- unrestricted `ProcessEvent`;
+- автоматическую замену Blueprint без явного supported action.
 
-Close Unreal Editor and review local modifications before removing:
+Executor остаётся authoritative boundary: даже план от LLM проходит валидацию, dry-run, выполнение и audit.
 
-```text
-Content/Python/execute_actions.py
-Content/Python/init_unreal.py
-Content/Python/actions.json
-.agents/skills/unreal-game-builder/
-Plugins/UnrealCodexGraph/
-```
+## Лицензия
 
-`Content/Python/result.json` is runtime output. Do not remove surrounding directories if they contain unrelated files. Plugin entries in `.uproject` are not removed automatically.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+MIT. См. [LICENSE](LICENSE).
