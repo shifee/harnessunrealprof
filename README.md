@@ -268,19 +268,31 @@ run-json
 
 ## Запуск LLM-агента
 
-Команда `ask` использует модель только для построения плана. Модель не получает shell, Python или прямой доступ к Unreal.
+Команда `ask` передаёт модели текст задачи и доступные Unreal actions. Модель возвращает декларативный JSON-план; она не получает shell, Python или прямой доступ к Unreal. Harness валидирует план и исполняет его через обычный action executor.
 
 Поток выполнения:
 
 ```text
-prompt
-  -> LLM генерирует JSON plan
-  -> проверка JSON и action allowlist
-  -> AgentRun получает capabilities
-  -> dry-run
-  -> execute
-  -> result.json
+задача
+  -> при неоднозначности: вопрос пользователю и повторное планирование
+  -> LLM строит JSON-план из доступных actions
+  -> проверка контракта и dry-run
+  -> preview либо подтверждение high-risk действий
+  -> исполнение через Unreal JSON executor
+  -> read-only verification и postcondition assertions
+  -> отчёт об изменённых объектах и проверках
 ```
+
+Для просмотра и проверки плана без исполнения команд используй `--preview`:
+
+```powershell
+py -m unreal_harness ask `
+  --project "D:\Projects\YourProject\YourProject.uproject" `
+  --preview `
+  "Создай Blueprint BP_TestActor в /Game/Test"
+```
+
+Рискованные actions требуют явного подтверждения в интерактивном терминале. Если подтверждение недоступно, например при запуске без TTY, выполнение таких actions запрещено. После мутации `ask` выполняет отдельный read-only verification batch и сравнивает assertions с фактическими результатами Unreal. Ошибка проверки возвращается как failure; уже сделанные Unreal изменения автоматически не откатываются.
 
 ### Ollama
 
