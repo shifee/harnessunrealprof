@@ -100,6 +100,23 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _human_summary(result: dict[str, Any]) -> str:
+    if result.get("success"):
+        phase = result.get("phase", "complete")
+        if result.get("read_only"):
+            return "Success: read-only plan validated (no mutation or save)."
+        return "Success: {} phase completed.".format(phase)
+    parts = ["Failed"]
+    if result.get("phase"):
+        parts.append("during {}".format(result["phase"]))
+    if result.get("failed_command"):
+        parts.append("command {}".format(result["failed_command"]))
+    if result.get("partial_changes") or result.get("changed_objects"):
+        parts.append("partial changes may have occurred")
+    if result.get("audit_path"):
+        parts.append("audit: {}".format(result["audit_path"]))
+    return " ".join(parts) + "."
+
 def main(argv: Sequence[str] | None = None, *, transport_factory: Callable[..., Any] = FileExecutionTransport) -> int:
     parser = make_parser()
     try:
@@ -112,6 +129,7 @@ def main(argv: Sequence[str] | None = None, *, transport_factory: Callable[..., 
             planner = OpenAICompatiblePlanner(endpoint=args.endpoint, model=args.model, api_key=args.api_key, timeout=args.timeout)
             result = AgentRun(transport, planner).run(args.task)
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            print(_human_summary(result), file=sys.stderr)
             return 0 if result.get("success") else 1
         document = build_document(args)
         project = Path(args.project).expanduser()
@@ -120,7 +138,8 @@ def main(argv: Sequence[str] | None = None, *, transport_factory: Callable[..., 
         transport = transport_factory(project, timeout=args.timeout)
         result = transport.submit(document, timeout=args.timeout)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-        return 0
+        print(_human_summary(result), file=sys.stderr)
+        return 0 if result.get("success", False) else 1
     except (ValueError, OSError, TypeError, RuntimeError) as exc:
         print("error: {}".format(exc), file=sys.stderr)
         return 2

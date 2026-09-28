@@ -541,7 +541,8 @@ def main(argv=None):
             )
         except subprocess.TimeoutExpired as error:
             raise AssertionError("Unreal commandlet timed out") from error
-        if completed.returncode != 0 and not (args.native_reflection and result_path.is_file()):
+        expected_partial_failure = args.native_reflection or args.asset_create or args.recovery
+        if completed.returncode != 0 and not (expected_partial_failure and result_path.is_file()):
             raise AssertionError("Unreal commandlet exited with status {}".format(completed.returncode))
         if not result_path.is_file():
             raise AssertionError("Unreal did not write result.json")

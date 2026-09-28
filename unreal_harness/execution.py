@@ -1,27 +1,16 @@
-"""Small transport boundary over the existing actions.json watcher.
-
-The transport deliberately does not know Unreal action semantics. It writes one
-complete document, waits for the atomic result to change, and returns the
-structured envelope. Higher-level agent code can use the same boundary for
-capabilities, inspection, dry-runs, and mutations.
-"""
-
+"""File transport for the Unreal actions.json watcher."""
 from __future__ import annotations
-from typing import Any, Dict, Optional, Union
 import json
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
-
+from typing import Any, Dict, Optional, Union
+from .action_contract import ActionValidationError, validate_document
 
 class UnrealExecutionError(RuntimeError):
-    """Raised when the file transport cannot submit or receive a run."""
-
+    """Raised when validation or file transport fails."""
 
 class FileExecutionTransport:
-    """Submit serialized command documents to an open Unreal Editor project."""
-
     def __init__(self, project_root: Union[Path, str], timeout: float = 30.0, poll_interval: float = 0.1):
         self.project_root = Path(project_root).expanduser().resolve()
         self.input_path = self.project_root / "Content" / "Python" / "actions.json"
@@ -35,6 +24,10 @@ class FileExecutionTransport:
         payload = dict(document)
         payload.setdefault("format_version", "1.0")
         payload.setdefault("commands", [])
+        try:
+            validate_document(payload)
+        except ActionValidationError as exc:
+            raise UnrealExecutionError(f"{exc.code}: {exc}") from exc
         payload["run_id"] = str(payload.get("run_id") or uuid.uuid4())
         self.input_path.parent.mkdir(parents=True, exist_ok=True)
         before = self._state(self.result_path)
@@ -51,6 +44,7 @@ class FileExecutionTransport:
                     time.sleep(self.poll_interval)
                     continue
                 if result.get("run_id") == payload["run_id"]:
+                    result.setdefault("audit_path", str(self.result_path))
                     return result
             time.sleep(self.poll_interval)
         raise UnrealExecutionError("Timed out waiting for Unreal result.json")

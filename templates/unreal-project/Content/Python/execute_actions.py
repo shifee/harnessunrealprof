@@ -2110,6 +2110,31 @@ MUTATING_ACTIONS = {
 }
 
 
+ACTION_ARGUMENTS = {
+    "system.capabilities": (), "system.describe_actions": (), "object.describe": ("object", "limit"),
+    "object.describe_functions": ("object", "limit"), "object.call": ("object", "function", "arguments"),
+    "object.inspect": ("object", "properties", "depth"), "object.set": ("object", "properties"),
+    "content.create_folder": ("path", "conflict_mode"), "content.list": ("path", "recursive", "limit", "query"),
+    "asset.inspect": ("asset",), "asset.search": ("path", "query", "class", "limit", "offset", "recursive"),
+    "asset.describe_types": ("limit", "offset"), "asset.create": ("folder", "name", "conflict_mode", "class", "asset_class", "factory", "replace_existing"),
+    "asset.duplicate": ("source", "destination"), "asset.save": ("assets", "asset_paths", "packages", "package_paths"),
+    "material.create": ("folder", "name", "conflict_mode", "base_color", "metallic", "roughness", "replace_existing"),
+    "material.inspect": ("material",), "material_instance.create": ("folder", "name", "parent"),
+    "material_instance.set_parameters": ("material_instance", "scalar", "vector", "static_switch"),
+    "blueprint.create": ("folder", "name", "parent_class", "conflict_mode", "replace_existing"),
+    "blueprint.inspect": ("blueprint",), "graph.describe": ("blueprint", "graph"),
+    "backend.capabilities": (), "backend.describe": ("backend",), "backend.operation": ("backend", "operation", "payload"),
+    "graph.search_nodes": ("blueprint", "graph", "query"), "graph.describe_node": ("kind",),
+    "blueprint.compile": ("blueprint", "save"), "blueprint.edit": ("blueprint", "operations", "compile", "save", "conflict_mode"),
+    "blueprint.graph.inspect": ("blueprint", "graph"), "blueprint.graph.add_node": ("blueprint", "graph", "node_id", "node", "position"),
+    "blueprint.graph.connect": ("blueprint", "graph", "from", "to"), "blueprint.graph.set_pin_value": ("blueprint", "graph", "node", "pin", "value"),
+    "blueprint.graph.remove_node": ("blueprint", "graph", "node", "node_id"), "blueprint.graph.disconnect": ("blueprint", "graph", "from", "to", "all", "node", "pin"),
+    "level.inspect": ("query", "class", "selected_only", "limit"), "level.spawn_actor": ("level", "class", "transform", "actor_label", "actor_name", "conflict_mode"),
+    "level.set_actor_transform": ("actor_name", "actor_label", "transform"), "level.set_actor_property": ("actor_name", "actor_label", "property", "value"),
+    "project.save": ("save_level", "save_assets"), "recipe.validate": ("recipe",), "recipe.execute": ("recipe",),
+}
+
+
 def validate_document(document):
     require(isinstance(document, dict), "Document root must be an object", "invalid_document")
     require(document.get("format_version") == "1.0", "Unsupported format_version", "unsupported_format")
@@ -2122,9 +2147,27 @@ def validate_document(document):
         command_id = command.get("id")
         action = command.get("action")
         require(isinstance(command_id, str) and command_id, "Command id must be a non-empty string", "invalid_command")
+        require(action in ACTION_HANDLERS, "Unsupported action: " + str(action), "unsupported_action")
+        arguments = command.get("arguments", {})
+        require(isinstance(arguments, dict), "arguments must be an object: " + command_id, "invalid_arguments")
+        allowed_command_fields = {"id", "action", "arguments", "depends_on", "condition", "recipe_id", "conflict_mode"}
+        require(not (set(command) - allowed_command_fields), "Unknown command fields", "invalid_command")
+        allowed_arguments = set(ACTION_ARGUMENTS[action]) | {"conflict_mode"}
+        require(not (set(arguments) - allowed_arguments), "Unknown arguments for " + action, "invalid_arguments")
+        required_arguments = {
+            "object.call": ("object", "function"), "object.inspect": ("object", "properties"), "object.set": ("object", "properties"),
+            "content.create_folder": ("path",), "asset.inspect": ("asset",), "material.inspect": ("material",),
+            "material_instance.create": ("folder", "name", "parent"), "blueprint.inspect": ("blueprint",),
+            "graph.describe": ("blueprint",), "backend.describe": ("backend",), "backend.operation": ("backend", "operation"),
+            "graph.describe_node": ("kind",), "blueprint.compile": ("blueprint",), "blueprint.edit": ("blueprint", "operations"),
+            "blueprint.graph.inspect": ("blueprint",), "blueprint.graph.add_node": ("blueprint", "node_id", "node"),
+            "blueprint.graph.connect": ("blueprint", "from", "to"), "blueprint.graph.set_pin_value": ("blueprint", "node", "pin", "value"),
+            "level.spawn_actor": ("class",), "level.set_actor_property": ("property", "value"),
+            "recipe.validate": ("recipe",), "recipe.execute": ("recipe",),
+        }.get(action, ())
+        require(all(key in arguments for key in required_arguments), "Missing required arguments for " + action, "missing_argument")
         require(command_id not in seen, "Duplicate command id: " + command_id, "duplicate_command_id")
         require(action in ACTION_HANDLERS, "Unsupported action: " + str(action), "unsupported_action")
-        require(isinstance(command.get("arguments", {}), dict), "arguments must be an object: " + command_id, "invalid_arguments")
         dependencies = command.get("depends_on", [])
         require(isinstance(dependencies, list) and all(isinstance(item, str) for item in dependencies), "depends_on must be an array of strings", "invalid_dependencies")
         missing = [item for item in dependencies if item not in seen]

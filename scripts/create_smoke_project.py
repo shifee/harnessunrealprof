@@ -2,6 +2,7 @@
 """Create a disposable Unreal Engine 5.8 project for harness smoke tests."""
 
 import argparse
+import json
 import shutil
 from pathlib import Path
 
@@ -14,10 +15,11 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Directory to create")
     parser.add_argument("--force", action="store_true", help="Replace an existing output directory")
+    parser.add_argument("--graph-plugin-package", type=Path, help="Built UnrealCodexGraph plugin package to install")
     return parser.parse_args(argv)
 
 
-def create_project(output, force=False):
+def create_project(output, force=False, graph_plugin_package=None):
     output = output.expanduser().resolve()
     if output.exists():
         if not force:
@@ -25,19 +27,29 @@ def create_project(output, force=False):
         shutil.rmtree(str(output))
     output.mkdir(parents=True)
     for source in TEMPLATE_ROOT.iterdir():
+        if source.name == "UnrealCodexGraph.uplugin":
+            continue
+        if source.name == "UnrealCodexSmoke.uproject":
+            continue
         if source.name == "UnrealCodexHarnessSmoke.uproject":
-            shutil.copy2(str(source), str(output / source.name))
-        elif source.name in {"Content", "Plugins"}:
+            project_data = json.loads(source.read_text(encoding="utf-8"))
+            if graph_plugin_package:
+                project_data["Plugins"].append({"Name": "UnrealCodexGraph", "Enabled": True})
+            (output / source.name).write_text(json.dumps(project_data, indent=2) + "\n", encoding="utf-8")
+        elif source.name == "Content":
             shutil.copytree(str(source), str(output / source.name))
-    skill_destination = output / ".agents/skills/unreal-game-builder"
-    shutil.copytree(str(SKILL_ROOT), str(skill_destination))
+        elif source.name == "Plugins":
+            if graph_plugin_package:
+                shutil.copytree(str(graph_plugin_package), str(output / source.name / "UnrealCodexGraph"))
+            else:
+                shutil.copytree(str(source), str(output / source.name), ignore=shutil.ignore_patterns("UnrealCodexGraph"))
     return output / "UnrealCodexHarnessSmoke.uproject"
 
 
 def main(argv=None):
     args = parse_args(argv)
     try:
-        project = create_project(args.output, args.force)
+        project = create_project(args.output, args.force, args.graph_plugin_package.expanduser().resolve() if args.graph_plugin_package else None)
     except (OSError, ValueError) as error:
         print("ERROR: {}".format(error))
         return 2
