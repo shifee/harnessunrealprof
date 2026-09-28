@@ -54,6 +54,45 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertNotEqual(FakeTransport.instances[0].documents[0]["run_id"], "stale")
 
+    def test_ask_runs_read_only_verification_after_mutation(self):
+        from unittest.mock import patch
+
+        class Planner:
+            def __init__(self, **kwargs):
+                pass
+
+            def __call__(self, task, context):
+                return {"commands": [{"id": "spawn", "action": "level.spawn_actor", "arguments": {"class": "/Script/Engine.Actor"}}]}
+
+            def plan_verification(self, task, context):
+                self.verify_context = context
+                return {"commands": [{"id": "inspect", "action": "level.inspect", "arguments": {}}],
+                        "assertions": [{"command_id": "inspect", "path": "$.checked", "operator": "equals", "value": True}]}
+
+        class VerifyingTransport(FakeTransport):
+            def submit(self, document, timeout=None):
+                self.documents.append(document)
+                index = len(self.documents)
+                if index == 1:
+                    return {"success": True, "commands": [
+                        {"data": {"actions": ["system.capabilities", "level.spawn_actor", "level.inspect"]}},
+                        {"data": {"actions": [
+                            {"name": "system.capabilities", "mutating": False},
+                            {"name": "level.spawn_actor", "mutating": True},
+                            {"name": "level.inspect", "mutating": False},
+                        ]}},
+                    ]}
+                if index == 4:
+                    return {"success": True, "commands": [{"id": "inspect", "success": True, "data": {"checked": True}}], "changed_objects": []}
+                return {"success": True, "commands": []}
+
+        FakeTransport.instances = []
+        with tempfile.TemporaryDirectory() as directory, patch("unreal_harness.cli.OpenAICompatiblePlanner", Planner):
+            code = main(["ask", "--project", directory, "--model", "test", "spawn actor"], transport_factory=VerifyingTransport)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(FakeTransport.instances[0].documents), 4)
+        self.assertEqual(FakeTransport.instances[0].documents[-1]["commands"][0]["action"], "level.inspect")
+
     def test_invalid_vector_is_rejected_by_parser(self):
         from unreal_harness.cli import make_parser
         with self.assertRaises(SystemExit):

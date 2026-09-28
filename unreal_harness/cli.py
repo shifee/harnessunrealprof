@@ -96,15 +96,45 @@ def make_parser() -> argparse.ArgumentParser:
     p = command("create-material"); p.add_argument("--folder", required=True); p.add_argument("--name", required=True); p.add_argument("--base-color", type=_json_value, default=[1.0, 1.0, 1.0, 1.0]); p.add_argument("--metallic", type=float, default=0.0); p.add_argument("--roughness", type=float, default=0.5); p.add_argument("--save", action="store_true")
     p = command("set-property"); p.add_argument("--actor-label", required=True); p.add_argument("--property", required=True); p.add_argument("--value", type=_json_value, required=True); p.add_argument("--save", action="store_true")
     p = command("run-json"); p.add_argument("document")
-    p = command("ask"); p.add_argument("task"); p.add_argument("--model"); p.add_argument("--endpoint"); p.add_argument("--api-key")
+    p = command("ask"); p.add_argument("task"); p.add_argument("--model"); p.add_argument("--endpoint"); p.add_argument("--api-key"); p.add_argument("--preview", action="store_true", help="validate and show the plan without executing mutations")
     return parser
 
 
+def _ask_clarification(clarification: dict[str, Any]) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    question = clarification.get("question", "Please clarify the task")
+    print(question, file=sys.stderr)
+    options = clarification.get("options", [])
+    for index, option in enumerate(options, 1):
+        print("{}. {}".format(index, option), file=sys.stderr)
+    try:
+        answer = input("Answer (or blank to cancel): ").strip()
+    except EOFError:
+        return False
+    if not answer:
+        return False
+    clarification["answer"] = answer
+    return True
+
+
+def _confirm_high_risk(summary: dict[str, Any]) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    print("High-risk actions:", file=sys.stderr)
+    for command in summary["high_risk_commands"]:
+        print("- {} {}".format(command.get("action"), json.dumps(command.get("arguments", {}), ensure_ascii=False)), file=sys.stderr)
+    try:
+        return input("Execute these actions? [y/N] ").strip().lower() in {"y", "yes"}
+    except EOFError:
+        return False
 def _human_summary(result: dict[str, Any]) -> str:
     if result.get("success"):
         phase = result.get("phase", "complete")
         if result.get("read_only"):
             return "Success: read-only plan validated (no mutation or save)."
+        if phase == "preview":
+            return "Preview ready; no mutation executed."
         return "Success: {} phase completed.".format(phase)
     parts = ["Failed"]
     if result.get("phase"):
@@ -127,7 +157,15 @@ def main(argv: Sequence[str] | None = None, *, transport_factory: Callable[..., 
                 project = project.parent
             transport = transport_factory(project, timeout=args.timeout)
             planner = OpenAICompatiblePlanner(endpoint=args.endpoint, model=args.model, api_key=args.api_key, timeout=args.timeout)
-            result = AgentRun(transport, planner).run(args.task)
+            task = args.task
+            for _ in range(5):
+                result = AgentRun(transport, planner).run(task, preview=args.preview, approve=_confirm_high_risk)
+                if result.get("phase") != "clarification":
+                    break
+                clarification = result["clarification"]
+                if not _ask_clarification(clarification):
+                    break
+                task = clarification["task"] + "\nUser clarification: " + clarification["answer"]
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             print(_human_summary(result), file=sys.stderr)
             return 0 if result.get("success") else 1
