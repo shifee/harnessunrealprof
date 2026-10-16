@@ -122,6 +122,8 @@ def make_parser() -> argparse.ArgumentParser:
     p = command("run-json"); p.add_argument("document")
     for name in ("ask", "resume", "chat"):
         p = command(name)
+        if name == "ask":
+            p.add_argument("--preview", action="store_true", help="Validate a single-pass plan without executing it")
         if name != "chat":
             p.add_argument("task" if name == "ask" else "task_id")
         p.add_argument("--model"); p.add_argument("--endpoint"); p.add_argument("--api-key")
@@ -141,12 +143,43 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _ask_clarification(clarification: dict[str, Any]) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    question = clarification.get("question", "Please clarify the task")
+    print(question, file=sys.stderr)
+    options = clarification.get("options", [])
+    for index, option in enumerate(options, 1):
+        print("{}. {}".format(index, option), file=sys.stderr)
+    try:
+        answer = input("Answer (or blank to cancel): ").strip()
+    except EOFError:
+        return False
+    if not answer:
+        return False
+    clarification["answer"] = answer
+    return True
+
+def _confirm_high_risk(summary: dict[str, Any]) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    print("High-risk actions:", file=sys.stderr)
+    for command in summary["high_risk_commands"]:
+        print("- {} {}".format(command.get("action"), json.dumps(command.get("arguments", {}), ensure_ascii=False)), file=sys.stderr)
+    try:
+        return input("Execute these actions? [y/N] ").strip().lower() in {"y", "yes"}
+    except EOFError:
+        return False
+
+
 def _human_summary(result: dict[str, Any]) -> str:
     runtime = result.get("result", result)
     lines = []
     if result.get("success"):
-        lines.append("Success: Unreal state read." if result.get("read_only") else
+        lines.append("Preview ready; no mutation executed." if result.get("phase") == "preview" else "Success: Unreal state read." if result.get("read_only") else
                      "Success: execution and read-back completed." if result.get("phase") == "verify" else "Success: execution completed.")
+        if result.get("phase") == "preview":
+            lines.append(json.dumps(result.get("document", result.get("plan")), ensure_ascii=False, indent=2))
     else:
         lines.append("Failed during {}.".format(result.get("phase", "execution")))
         error = result.get("error")
@@ -256,6 +289,8 @@ def main(argv: Sequence[str] | None = None, *, transport_factory: Callable[..., 
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command in {"ask", "resume", "chat"}:
+            if getattr(args, "preview", False):
+                args.single_pass = True
             if args.command == "chat" and (args.single_pass or args.json):
                 raise ValueError("Interactive chat requires the task agent and human-readable output")
             if args.command == "resume" and (args.single_pass or args.read_only or args.verify_json):
@@ -282,7 +317,16 @@ def main(argv: Sequence[str] | None = None, *, transport_factory: Callable[..., 
             elif args.session:
                 result = agent.run(args.task, read_only=args.read_only, verify=verification, session=args.session)
             else:
-                result = agent.run(args.task, read_only=args.read_only, verify=verification)
+                if args.single_pass:
+                    task = args.task
+                    for _ in range(5):
+                        result = agent.run(task, read_only=args.read_only, verify=verification,
+                                           preview=getattr(args, "preview", False), approve=_confirm_high_risk)
+                        if result.get("phase") != "clarification" or not result.get("clarification") or not _ask_clarification(result["clarification"]):
+                            break
+                        task += "\nUser clarification: " + result["clarification"]["answer"]
+                else:
+                    result = agent.run(args.task, read_only=args.read_only, verify=verification)
             if result_callback:
                 result_callback(result)
             print(json.dumps(result, ensure_ascii=False, sort_keys=True) if args.json else _human_summary(result))

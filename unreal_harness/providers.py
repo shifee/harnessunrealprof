@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
-from .action_contract import ActionValidationError, validate_document, describe_contract, check
+from .action_contract import ActionValidationError, validate_document, describe_contract, check, is_mutating
 from .acceptance import PREPARATION_SCHEMA, validate_criteria
 
 class ProviderError(RuntimeError):
@@ -92,8 +92,12 @@ class OpenAICompatiblePlanner:
             "Do not set dry_run: the host manages preflight. Keep the scope of the user's task. "
             "If unsupported, return an empty commands array; the host will report that it cannot fulfill the task."
         )
+        system += " If the task is ambiguous, return {clarification:{question:string,options:[string]}} instead of guessing."
+        if context.get("verification_only"):
+            system += " Return read-only commands and concrete assertions: [{command_id,path:'$.field',operator:'equals'|'not_equals'|'exists',value}]. Never mutate or save."
         user = json.dumps({"task": task, "capabilities": capabilities,
-                           "action_catalog": schemas, "allowed_actions": catalog}, ensure_ascii=False)
+                           "action_catalog": schemas, "allowed_actions": catalog,
+                           "verification_context": {key: context[key] for key in ("plan", "execution_result") if key in context}}, ensure_ascii=False)
         payload = {"model": self.model, "temperature": 0,
                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                    "response_format": {"type": "json_object"}}
@@ -108,8 +112,18 @@ class OpenAICompatiblePlanner:
                 content = json.dumps(body)[:8000]
             try:
                 plan = self._parse_plan(body)
-                validate_document(plan, planner=True)
-                self.validate_plan(plan, catalog)
+                if isinstance(plan, dict) and "clarification" in plan:
+                    clarification = plan["clarification"]
+                    if (not isinstance(clarification, dict) or not isinstance(clarification.get("question"), str) or
+                            not clarification["question"].strip() or not isinstance(clarification.get("options", []), list) or
+                            any(not isinstance(option, str) for option in clarification.get("options", []))):
+                        raise ProviderError("LLM clarification is malformed")
+                    return {"clarification": clarification}
+                document = {key: value for key, value in plan.items() if key != "assertions"} if context.get("verification_only") else plan
+                if context.get("verification_only") and any(is_mutating(c) for c in document.get("commands", [])):
+                    raise ProviderError("Read-only plans cannot mutate or save")
+                validate_document(document, planner=True)
+                self.validate_plan(document, catalog)
                 return plan
             except (ActionValidationError, ProviderError) as exc:
                 if attempt >= self.max_corrections:
@@ -258,6 +272,42 @@ class OpenAICompatiblePlanner:
                     sink({"kind": "model_error", "error": str(exc)})
                 raise ProviderError("LLM request failed: {}".format(exc)) from exc
         raise ProviderError("LLM request failed")
+
+    def plan_verification(self, task: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a read-only batch and declarative checks over its results."""
+        verification_context = dict(context)
+        verification_context["verification_only"] = True
+        response = self(task, verification_context)
+        if not isinstance(response, dict) or not isinstance(response.get("commands"), list):
+            raise ProviderError("verification plan must contain commands")
+        assertions = response.get("assertions")
+        if not isinstance(assertions, list) or not assertions:
+            raise ProviderError("verification plan must contain concrete assertions")
+        from .action_contract import ACTION_METADATA
+        actions = context.get("capabilities", {}).get("actions", [])
+        for command in response["commands"]:
+            action = command["action"]
+            metadata = next((item for item in actions if isinstance(item, dict)
+                             and item.get("name", item.get("action")) == action), None)
+            mutates = (metadata.get("mutates", metadata.get("mutating")) if metadata else
+                       ACTION_METADATA.get(action, {}).get("mutates", True))
+            if mutates:
+                raise ProviderError("verification plan must use read-only actions: {}".format(action))
+        plan = {key: value for key, value in response.items() if key != "assertions"}
+        try:
+            validate_document(plan)
+        except ActionValidationError as exc:
+            raise ProviderError(str(exc)) from exc
+        for assertion in assertions:
+            if (not isinstance(assertion, dict) or assertion.get("command_id") not in
+                    {command["id"] for command in plan["commands"]} or
+                    assertion.get("operator") not in {"equals", "not_equals", "exists"} or
+                    not isinstance(assertion.get("path"), str) or not assertion["path"].startswith("$.")):
+                raise ProviderError("verification assertion is malformed")
+        plan["dry_run"] = False
+        plan["assertions"] = assertions
+        return plan
+
 
     @staticmethod
     def _parse_plan(body: Dict[str, Any]) -> Dict[str, Any]:

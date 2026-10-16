@@ -1,3 +1,4 @@
+import json
 import unittest
 from io import BytesIO
 from unittest.mock import patch
@@ -58,6 +59,15 @@ class ProviderContractTests(unittest.TestCase):
                 {"commands": [{"id": str(i), "action": "level.inspect", "arguments": {}} for i in range(201)]},
                 ["level.inspect"],
             )
+
+    def test_verification_planner_rejects_mutating_actions(self):
+        planner = OpenAICompatiblePlanner(model="test")
+        response = {"choices": [{"message": {"content": json.dumps({"commands": [{"id": "save", "action": "project.save", "arguments": {"save_assets": True}}], "assertions": [{"command_id": "save", "path": "$.success", "operator": "equals", "value": True}]})}}]}
+        with patch.object(planner, "_request", return_value=response):
+            with self.assertRaisesRegex(ProviderError, "Read-only plans"):
+                planner.plan_verification("create asset", {"capabilities": {"actions": [
+                    {"name": "project.save", "mutates": True}
+                ]}})
 
 
 if __name__ == "__main__":

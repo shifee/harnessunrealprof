@@ -14,16 +14,18 @@ Planner = Callable[[str, Dict[str, Any]], Dict[str, Any]]
 
 class AgentRun:
     """Drive one bounded Unreal task through a transport-neutral execution API."""
+    HIGH_RISK_ACTIONS = {"object.call", "object.set", "backend.operation", "recipe.execute", "asset.duplicate", "project.save", "asset.save"}
+
     def __init__(self, transport: FileExecutionTransport, planner: Planner):
         self.transport = transport
         self.planner = planner
 
-    def run(self, task: str, *, verify: Optional[Dict[str, Any]] = None, read_only: bool = False) -> Dict[str, Any]:
+    def run(self, task: str, *, verify: Optional[Dict[str, Any]] = None, read_only: bool = False, preview=False, approve=None) -> Dict[str, Any]:
         session = getattr(self.transport, "session", nullcontext)
         with session():
-            return self._run(task, verify=verify, read_only=read_only)
+            return self._run(task, verify=verify, read_only=read_only, preview=preview, approve=approve)
 
-    def _run(self, task: str, *, verify: Optional[Dict[str, Any]] = None, read_only: bool = False) -> Dict[str, Any]:
+    def _run(self, task: str, *, verify: Optional[Dict[str, Any]] = None, read_only: bool = False, preview=False, approve=None) -> Dict[str, Any]:
         capabilities = self._submit(self._batch("capabilities", "system.capabilities"))
         if not capabilities.get("success"):
             return {"success": False, "phase": "capabilities", "result": capabilities}
@@ -50,6 +52,11 @@ class AgentRun:
             plan = self.planner(task, context)
         except (ValueError, RuntimeError) as exc:
             return {"success": False, "phase": "planning", "error": str(exc)}
+        if isinstance(plan, dict) and "clarification" in plan:
+            clarification = plan["clarification"]
+            if not isinstance(clarification, dict) or not isinstance(clarification.get("question"), str) or not clarification["question"].strip():
+                return {"success": False, "phase": "clarification", "error": "Malformed clarification"}
+            return {"success": False, "phase": "clarification", "clarification": dict(clarification, task=task)}
         try:
             plan = validate_document(plan, planner=True)
             plan = expand_document_recipes(plan)[0]
@@ -79,6 +86,12 @@ class AgentRun:
         planned = self._submit(dry_run)
         if not planned.get("success"):
             return self._failure("plan", planned, plan=planned)
+        if preview:
+            return {"success": True, "phase": "preview", "preview": True, "plan": planned, "document": plan}
+        high_risk = [command for command in plan["commands"] if is_mutating(command) and self._is_high_risk(command)]
+        if high_risk and (approve is None or not approve({"plan": planned, "high_risk_commands": high_risk})):
+            return {"success": False, "phase": "approval_required" if approve is None else "approval_denied",
+                    "plan": planned, "high_risk_commands": high_risk}
         # dry_run validates only; even a read-only task must actually execute.
         read_only = not any(is_mutating(c) for c in plan["commands"]) and not plan.get("recipes")
         executed = self._submit(dict(plan, dry_run=False))
@@ -86,21 +99,107 @@ class AgentRun:
             return self._failure("execute", executed, plan=planned, result=executed)
         if read_only and verify is None:
             return {"success": True, "phase": "execute", "plan": planned, "result": executed, "read_only": True}
+        assertions = []
+        automatic = build_verification(plan, executed) if verify is None else None
+        generated_verification = False
+        if verify is None and automatic[2] and hasattr(self.planner, "plan_verification"):
+            try:
+                generated = self.planner.plan_verification(task, {"capabilities": data, "action_catalog": catalog,
+                                                                 "plan": plan, "execution_result": executed})
+                assertions = generated.get("assertions", [])
+                verify = dict(generated)
+                verify.pop("assertions", None)
+                self._validate_assertions(assertions, verify)
+                validate_document(verify)
+                verify = expand_document_recipes(verify)[0]
+                verify.pop("recipes", None)
+                if any(is_mutating(command) for command in verify["commands"]):
+                    raise ValueError("Verification must contain read-only actions")
+                if actions is not None:
+                    available_names = {a if isinstance(a, str) else a["name"] for a in actions}
+                    if any(c["action"] not in available_names for c in verify["commands"]):
+                        raise ValueError("Verification uses unavailable actions")
+                generated_verification = True
+            except (ValueError, TypeError, AttributeError, RuntimeError) as exc:
+                return {"success": False, "phase": "verify_plan", "error": str(exc), "plan": planned,
+                        "result": executed, "execution_succeeded": True}
         if verify is None:
-            verify, checks, uncovered = build_verification(plan, executed)
+            verify, checks, uncovered = automatic
         else:
             checks, uncovered = [], []
+        if generated_verification:
+            used = {command["id"] for command in verify["commands"]}
+            for command, check in zip(automatic[0]["commands"], automatic[1]):
+                identifier = "host_" + command["id"]
+                while identifier in used:
+                    identifier = "host_" + identifier
+                used.add(identifier)
+                verify["commands"].append(dict(command, id=identifier))
+                checks.append(dict(check, id=identifier))
+            validate_document(verify)
         verified = self._submit(dict(verify, dry_run=False)) if verify["commands"] else {"success": True, "commands": []}
         errors = evaluate_verification(verified, checks) + uncovered
+        assertion_results = self._evaluate_assertions(assertions, verified)
+        errors += ["Postcondition assertion failed: " + item["assertion"]["path"] for item in assertion_results if not item["success"]]
         if any(command.get("skipped") for command in verified.get("commands", [])):
             errors.append("Read-back verification commands were skipped")
         result = {"success": bool(verified.get("success")) and not errors, "phase": "verify",
                   "plan": planned, "result": executed, "verification": verified,
                   "verification_errors": errors, "execution_succeeded": True}
+        if assertions:
+            result["assertions"] = assertion_results
         if not result["success"]:
             result.update(self._failure_details(verified))
             result["error"] = "; ".join(errors) or "Read-back verification failed"
         return result
+
+    @staticmethod
+    def _validate_assertions(assertions, document):
+        if not isinstance(assertions, list) or not assertions or not document.get("commands"):
+            raise ValueError("Verification needs commands and concrete assertions")
+        ids = {command["id"] for command in document["commands"]}
+        for assertion in assertions:
+            if (not isinstance(assertion, dict) or assertion.get("command_id") not in ids or
+                    assertion.get("operator") not in {"equals", "not_equals", "exists"} or
+                    not isinstance(assertion.get("path"), str) or not assertion["path"].startswith("$.") or
+                    (assertion["operator"] != "exists" and "value" not in assertion)):
+                raise ValueError("Malformed verification assertion")
+
+    @staticmethod
+    def _evaluate_assertions(assertions: list[Dict[str, Any]], verified: Dict[str, Any]) -> list[Dict[str, Any]]:
+        import re
+        results = []
+        command_results = {item.get("id"): item for item in verified.get("commands", []) if isinstance(item, dict)}
+        for assertion in assertions:
+            value: Any = command_results.get(assertion["command_id"], {}).get("data")
+            path = assertion["path"][2:]
+            tokens = re.findall(r"(?:^|\.)([A-Za-z_][A-Za-z0-9_]*)|\[([0-9]+)\]", path)
+            if not tokens or "".join(("." if index and field else "") + (field or "[" + item + "]")
+                                      for index, (field, item) in enumerate(tokens)) != path:
+                results.append({"assertion": assertion, "success": False, "actual": None})
+                continue
+            exists = True
+            for field, index in tokens:
+                try:
+                    value = value[field] if field else value[int(index)]
+                except (KeyError, IndexError, TypeError):
+                    exists = False
+                    break
+            operator = assertion["operator"]
+            expected = assertion.get("value")
+            passed = (exists if operator == "exists" else exists and (value == expected if operator == "equals" else value != expected))
+            passed = passed and command_results.get(assertion["command_id"], {}).get("success") is True
+            results.append({"assertion": assertion, "success": passed, "actual": value if exists else None})
+        return results
+
+    @classmethod
+    def _is_high_risk(cls, command: Dict[str, Any]) -> bool:
+        action = command.get("action", "")
+        if action in cls.HIGH_RISK_ACTIONS:
+            return True
+        arguments = command.get("arguments", {})
+        return isinstance(arguments, dict) and arguments.get("conflict_mode") == "update"
+
 
     def _submit(self, document):
         try:
