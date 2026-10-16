@@ -3,6 +3,7 @@ import os
 import re
 import traceback
 import uuid
+import runpy
 from itertools import product
 from datetime import datetime, timezone
 import unreal
@@ -46,9 +47,18 @@ BACKEND_REGISTRY = BackendRegistry()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ACTIONS_FILE = os.path.join(SCRIPT_DIR, "actions.json")
 RESULT_FILE = os.path.join(SCRIPT_DIR, "result.json")
+# Load the same contract file used by the host CLI, without module-cache drift.
+_contract_path = os.path.join(SCRIPT_DIR, "action_contract.py")
+if not os.path.isfile(_contract_path):
+    _contract_path = os.path.abspath(os.path.join(SCRIPT_DIR, "../../../../unreal_harness/action_contract.py"))
+_CONTRACT = runpy.run_path(_contract_path)
+ActionValidationError = _CONTRACT["ActionValidationError"]
+validate_action_arguments = _CONTRACT["validate_arguments"]
+
 HARNESS_VERSION = "0.1.0"
 MAX_COMMANDS = 200
 CURRENT_CHANGED_OBJECTS = []
+GRAPH_NODE_ALIASES = {}
 # The recipe transaction owner groups all nested mutating commands.  Nested
 # execute_command calls must not open/cancel their own transactions.
 ACTIVE_RECIPE_TRANSACTION = None
@@ -182,146 +192,8 @@ def save_json_file(path, data):
     os.replace(temporary_path, path)
 
 
-def conflict_mode(arguments, default="fail"):
-    mode = arguments.get("conflict_mode", default)
-    require(mode in CONFLICT_MODES, "Invalid conflict_mode: " + str(mode), "invalid_conflict_mode")
-    return mode
-
-
-def substitute_template(value, context):
-    if isinstance(value, str):
-        exact = TEMPLATE_VARIABLE.fullmatch(value)
-        if exact:
-            name = exact.group(1)
-            require(name in context, "Unknown recipe variable: " + name, "invalid_recipe")
-            return context[name]
-
-        def replace(match):
-            name = match.group(1)
-            require(name in context, "Unknown recipe variable: " + name, "invalid_recipe")
-            return str(context[name])
-
-        return TEMPLATE_VARIABLE.sub(replace, value)
-    if isinstance(value, list):
-        expanded = []
-        for item in value:
-            item_value = expand_recipe_value(item, context)
-            if isinstance(item, dict) and len(item) == 1 and next(iter(item), "") in {
-                "$repeat", "$mirror", "$grid"
-            }:
-                require(isinstance(item_value, list), "Recipe pattern must expand to a list", "invalid_recipe")
-                expanded.extend(item_value)
-            else:
-                expanded.append(item_value)
-        return expanded
-    if isinstance(value, dict):
-        return {key: expand_recipe_value(item, context) for key, item in value.items()}
-    return value
-
-
-def expand_pattern(kind, specification, context):
-    require(isinstance(specification, dict), kind + " must be an object", "invalid_recipe")
-    require("template" in specification, kind + " requires template", "invalid_recipe")
-    template = specification["template"]
-    contexts = []
-
-    if kind == "$repeat":
-        items = specification.get("items")
-        require(isinstance(items, list), "$repeat.items must be an array", "invalid_recipe")
-        for index, item in enumerate(items):
-            require(isinstance(item, dict), "$repeat items must be objects", "invalid_recipe")
-            item_context = dict(context)
-            item_context.update(item)
-            item_context.setdefault("index", index)
-            contexts.append(item_context)
-
-    elif kind == "$mirror":
-        axis = specification.get("axis")
-        item = specification.get("item", {})
-        overrides = specification.get("overrides", {})
-        require(axis in {"x", "y", "z"}, "$mirror.axis must be x, y, or z", "invalid_recipe")
-        require(isinstance(item, dict) and isinstance(overrides, dict), "$mirror item and overrides must be objects", "invalid_recipe")
-        require(isinstance(item.get(axis), (int, float)), "$mirror item must contain a numeric axis value", "invalid_recipe")
-        original = dict(context)
-        original.update(item)
-        original["mirror_index"] = 0
-        mirrored = dict(original)
-        mirrored[axis] = -item[axis]
-        mirrored.update(overrides)
-        mirrored["mirror_index"] = 1
-        contexts.extend((original, mirrored))
-
-    elif kind == "$grid":
-        axes = specification.get("axes")
-        base = specification.get("base", {})
-        require(isinstance(axes, dict) and axes, "$grid.axes must be a non-empty object", "invalid_recipe")
-        require(isinstance(base, dict), "$grid.base must be an object", "invalid_recipe")
-        axis_names = list(axes)
-        axis_values = []
-        for name in axis_names:
-            values = axes[name]
-            require(isinstance(values, list) and values, "$grid axis values must be non-empty arrays", "invalid_recipe")
-            axis_values.append(values)
-        for grid_index, combination in enumerate(product(*axis_values)):
-            item_context = dict(context)
-            item_context.update(base)
-            item_context["index"] = grid_index
-            for axis_index, (name, value) in enumerate(zip(axis_names, combination)):
-                item_context[name] = value
-                item_context[name + "_index"] = axes[name].index(value)
-                item_context["axis_{}_index".format(axis_index)] = axes[name].index(value)
-            contexts.append(item_context)
-
-    expanded = []
-    for item_context in contexts:
-        value = expand_recipe_value(template, item_context)
-        if isinstance(value, list):
-            expanded.extend(value)
-        else:
-            expanded.append(value)
-    return expanded
-
-
-def expand_recipe_value(value, context):
-    if isinstance(value, dict) and len(value) == 1:
-        kind = next(iter(value))
-        if kind in {"$repeat", "$mirror", "$grid"}:
-            return expand_pattern(kind, value[kind], context)
-    return substitute_template(value, context)
-
-
-def expand_document_recipes(document):
-    require(isinstance(document, dict), "Document root must be an object", "invalid_document")
-    raw_commands = document.get("commands", [])
-    require(isinstance(raw_commands, list), "'commands' must be an array", "invalid_document")
-    recipes = document.get("recipes", [])
-    require(isinstance(recipes, list), "'recipes' must be an array", "invalid_recipe")
-    commands = list(raw_commands)
-    summaries = []
-    seen_recipe_ids = set()
-    for recipe in recipes:
-        require(isinstance(recipe, dict), "Recipe must be an object", "invalid_recipe")
-        recipe_id = recipe.get("id")
-        require(isinstance(recipe_id, str) and recipe_id, "Recipe id must be a non-empty string", "invalid_recipe")
-        require(recipe_id not in seen_recipe_ids, "Duplicate recipe id: " + recipe_id, "invalid_recipe")
-        seen_recipe_ids.add(recipe_id)
-        mode = conflict_mode(recipe)
-        expanded = expand_recipe_value(recipe.get("commands", []), {})
-        require(isinstance(expanded, list), "Recipe commands must expand to an array", "invalid_recipe")
-        command_ids = []
-        for command in expanded:
-            require(isinstance(command, dict), "Expanded recipe command must be an object", "invalid_recipe")
-            command = dict(command)
-            command["recipe_id"] = recipe_id
-            arguments = dict(command.get("arguments", {}))
-            arguments.setdefault("conflict_mode", mode)
-            command["arguments"] = arguments
-            commands.append(command)
-            command_ids.append(command.get("id"))
-        summaries.append({"id": recipe_id, "conflict_mode": mode, "commands": command_ids})
-    expanded_document = dict(document)
-    expanded_document["commands"] = commands
-    return expanded_document, summaries
+conflict_mode = _CONTRACT["conflict_mode"]
+expand_document_recipes = _CONTRACT["expand_document_recipes"]
 
 
 RESULT_CONTEXT = {}
@@ -361,34 +233,8 @@ def evaluate_condition(condition):
     return bool(value)
 
 
-def validate_recipe_parameters(recipe):
-    parameters = recipe.get("parameters", {})
-    require(isinstance(parameters, dict), "recipe.parameters must be an object", "invalid_recipe")
-    schema = recipe.get("parameter_schema", {})
-    require(isinstance(schema, dict), "recipe.parameter_schema must be an object", "invalid_recipe")
-    required = schema.get("required", [])
-    require(isinstance(required, list) and all(isinstance(name, str) for name in required), "parameter_schema.required must be an array of strings", "invalid_recipe")
-    missing = [name for name in required if name not in parameters]
-    require(not missing, "Missing recipe parameters: " + ", ".join(missing), "invalid_recipe")
-    types = schema.get("types", {})
-    require(isinstance(types, dict), "parameter_schema.types must be an object", "invalid_recipe")
-    for name, expected in types.items():
-        require(name in parameters, "Missing recipe parameter: " + name, "invalid_recipe")
-        value = parameters[name]
-        valid = {"string": isinstance(value, str), "number": isinstance(value, (int, float)) and not isinstance(value, bool), "boolean": isinstance(value, bool), "array": isinstance(value, list), "object": isinstance(value, dict)}.get(expected)
-        require(valid is True, "Invalid type for recipe parameter: " + name, "invalid_recipe")
-    return parameters
+recipe_commands = _CONTRACT["recipe_commands"]
 
-
-def recipe_commands(recipe):
-    validate_recipe_parameters(recipe)
-    expanded = expand_recipe_value(recipe.get("commands", []), recipe.get("parameters", {}))
-    require(isinstance(expanded, list), "Recipe commands must expand to an array", "invalid_recipe")
-    normalized = []
-    for command in expanded:
-        require(isinstance(command, dict), "Expanded recipe command must be an object", "invalid_recipe")
-        normalized.append(dict(command))
-    return normalized
 def recipe_references(value):
     if isinstance(value, dict) and set(value) == {"$ref"}:
         reference = value["$ref"]
@@ -408,36 +254,9 @@ def recipe_references(value):
 
 
 def validate_recipe_commands(commands):
-    require(len(commands) <= MAX_COMMANDS, "Too many recipe commands; maximum is " + str(MAX_COMMANDS), "too_many_commands")
-    seen = set()
-    for index, command in enumerate(commands):
-        require(isinstance(command, dict), "Recipe command at index {} must be an object".format(index), "invalid_recipe")
-        command_id = command.get("id")
-        action = command.get("action")
-        require(isinstance(command_id, str) and command_id, "Recipe command id is required", "invalid_recipe")
-        require(command_id not in seen, "Duplicate recipe command id: " + command_id, "duplicate_command_id")
-        require(action in ACTION_HANDLERS, "Unsupported recipe action: " + str(action), "unsupported_action")
-        require(isinstance(command.get("arguments", {}), dict), "arguments must be an object: " + command_id, "invalid_arguments")
-        dependencies = command.get("depends_on", [])
-        require(isinstance(dependencies, list) and all(isinstance(item, str) for item in dependencies), "depends_on must be an array of strings", "invalid_dependencies")
-        missing = [item for item in dependencies if item not in seen]
-        require(not missing, "Dependencies must refer to earlier recipe commands: " + ", ".join(missing), "invalid_dependencies")
-        if "condition" in command:
-            condition = command["condition"]
-            require(isinstance(condition, dict), "condition must be an object", "invalid_condition")
-            require(set(condition).issubset({"ref", "equals", "not_equals", "exists"}), "Unsupported condition fields", "invalid_condition")
-            reference = condition.get("ref")
-            require(isinstance(reference, str) and reference, "condition.ref is required", "invalid_condition")
-            require(reference.split(".", 1)[0] in seen, "Condition must target an earlier command: " + reference, "invalid_reference")
-            if "exists" in condition:
-                require(isinstance(condition["exists"], bool), "condition.exists must be a boolean", "invalid_condition")
-        for value in (command.get("arguments", {}), command.get("condition")):
-            if value is not None:
-                for reference in recipe_references(value):
-                    referenced_id = reference.split(".", 1)[0]
-                    require(referenced_id in seen, "Recipe reference must target an earlier command: " + reference, "invalid_reference")
-        seen.add(command_id)
+    validate_document({"format_version": "1.0", "commands": commands})
     return commands
+
 
 def execute_recipe_validate(arguments):
     recipe = arguments.get("recipe")
@@ -524,7 +343,22 @@ def execute_list_content(arguments):
     if query:
         assets = [asset for asset in assets if query in str(asset).lower()]
     total = len(assets)
-    return {"path": path, "total": total, "truncated": total > limit, "assets": assets[:limit]}
+    return {"path": path, "directory_exists": unreal.EditorAssetLibrary.does_directory_exist(path),
+            "total": total, "truncated": total > limit, "assets": assets[:limit]}
+
+
+def package_file_exists(path):
+    if not path.startswith("/Game/") or "\\" in path or ":" in path:
+        return False
+    content_root = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+    for extension in (".uasset", ".umap"):
+        candidate = os.path.abspath(os.path.join(content_root, path[len("/Game/"):] + extension))
+        try:
+            if os.path.commonpath([content_root, candidate]) == content_root and os.path.isfile(candidate):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def execute_inspect_asset(arguments):
@@ -538,6 +372,7 @@ def execute_inspect_asset(arguments):
         "class": asset.get_class().get_path_name(),
         "package": asset.get_outermost().get_path_name(),
         "asset_class": str(asset_data.asset_class_path) if asset_data else None,
+        "exists_on_disk": package_file_exists(path),
     }
 
 def load_reflected_object(path):
@@ -1089,13 +924,9 @@ def execute_asset_save(arguments):
         require(package is not None, "Package not found: " + path)
         package_objects.append(package)
     if asset_objects:
-        saver = getattr(unreal, "EditorLoadingAndSavingUtils", None)
-        require(saver is not None and hasattr(saver, "save_dirty_packages"), "Package save API is unavailable", "api_unavailable")
-        try:
-            saver.save_dirty_packages(True, True)
-        except Exception as error:
-            raise HarnessError("validation_error", "Could not save selected asset packages") from error
         for asset in asset_objects:
+            require(unreal.EditorAssetLibrary.save_loaded_asset(asset, False),
+                    "Could not save selected asset: " + object_path(asset), "save_failed")
             mark_changed(object_path(asset))
     if package_objects:
         saver = getattr(unreal, "EditorLoadingAndSavingUtils", None)
@@ -1139,8 +970,9 @@ def execute_create_blueprint(arguments):
         name, folder, None, factory
     )
     require(blueprint is not None, "Could not create Blueprint: " + asset_path)
+    mark_changed(blueprint)
     unreal.BlueprintEditorLibrary.compile_blueprint(blueprint)
-    unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False)
+    require(unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False), "Could not save Blueprint", "save_failed")
     mark_changed(blueprint)
     return {
         "asset_path": object_path,
@@ -1231,6 +1063,7 @@ def execute_create_material(arguments):
         )
         require(material is not None, "Could not create Material: " + asset_path)
 
+    mark_changed(material)
     base_color, metallic, roughness = configure_simple_material(
         material, arguments, clear_existing=exists and mode == "update"
     )
@@ -1266,9 +1099,9 @@ def execute_inspect_material(arguments):
         name = str(parameter)
         item = {"name": name}
         if isinstance(material, unreal.MaterialInstanceConstant):
-            item["value"] = float(
-                editing.get_material_instance_scalar_parameter_value(material, parameter)
-            )
+            item["value"] = float(editing.get_material_instance_scalar_parameter_value(material, parameter))
+        elif isinstance(material, unreal.Material):
+            item["value"] = float(editing.get_material_default_scalar_parameter_value(material, parameter))
         result["scalar_parameters"].append(item)
     for parameter in editing.get_vector_parameter_names(material):
         name = str(parameter)
@@ -1276,14 +1109,17 @@ def execute_inspect_material(arguments):
         if isinstance(material, unreal.MaterialInstanceConstant):
             color = editing.get_material_instance_vector_parameter_value(material, parameter)
             item["value"] = [color.r, color.g, color.b, color.a]
+        elif isinstance(material, unreal.Material):
+            color = editing.get_material_default_vector_parameter_value(material, parameter)
+            item["value"] = [color.r, color.g, color.b, color.a]
         result["vector_parameters"].append(item)
     for parameter in editing.get_static_switch_parameter_names(material):
         name = str(parameter)
         item = {"name": name}
         if isinstance(material, unreal.MaterialInstanceConstant):
-            item["value"] = bool(
-                editing.get_material_instance_static_switch_parameter_value(material, parameter)
-            )
+            item["value"] = bool(editing.get_material_instance_static_switch_parameter_value(material, parameter))
+        elif isinstance(material, unreal.Material):
+            item["value"] = bool(editing.get_material_default_static_switch_parameter_value(material, parameter))
         result["static_switch_parameters"].append(item)
     if isinstance(material, unreal.MaterialInstanceConstant):
         result["parent"] = object_path(material.get_editor_property("parent"))
@@ -1309,8 +1145,9 @@ def execute_create_material_instance(arguments):
         name, folder, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew()
     )
     require(instance is not None, "Could not create Material Instance: " + asset_path)
+    mark_changed(instance)
     unreal.MaterialEditingLibrary.set_material_instance_parent(instance, parent)
-    unreal.EditorAssetLibrary.save_loaded_asset(instance, False)
+    require(unreal.EditorAssetLibrary.save_loaded_asset(instance, False), "Could not save material instance", "save_failed")
     mark_changed(instance)
     return {"asset_path": object_path(instance), "parent": object_path(parent)}
 
@@ -1343,7 +1180,7 @@ def execute_set_material_instance_parameters(arguments):
             "Static switch parameter not found: " + str(name),
         )
         changed["static_switch"].append(str(name))
-    unreal.EditorAssetLibrary.save_loaded_asset(instance, False)
+    require(unreal.EditorAssetLibrary.save_loaded_asset(instance, False), "Could not save material instance", "save_failed")
     mark_changed(instance)
     changed["material_instance"] = object_path(instance)
     return changed
@@ -1466,7 +1303,7 @@ def execute_compile_blueprint(arguments):
     require(isinstance(blueprint, unreal.Blueprint), "Blueprint not found: " + blueprint_path)
     compile_status, diagnostics = compile_blueprint_checked(blueprint)
     if arguments.get("save", False):
-        unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False)
+        require(unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False), "Could not save Blueprint", "save_failed")
     mark_changed(blueprint)
     return {
         "blueprint": object_path(blueprint),
@@ -1652,6 +1489,7 @@ def execute_edit_blueprint(arguments):
     require(blueprint is not None, "Blueprint not found: " + blueprint_path)
     subsystem, root_handle, components, component_handles = get_blueprint_components(blueprint)
     operation_results = []
+    mark_changed(blueprint)
 
     for operation in arguments.get("operations", []):
         operation = dict(operation)
@@ -1680,7 +1518,7 @@ def execute_edit_blueprint(arguments):
     if arguments.get("compile", True):
         compile_status, diagnostics = compile_blueprint_checked(blueprint)
     if arguments.get("save", True):
-        unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False)
+        require(unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False), "Could not save Blueprint", "save_failed")
     mark_changed(blueprint)
     return {
         "compile_diagnostics": diagnostics,
@@ -1826,17 +1664,14 @@ def execute_set_actor_property(arguments):
 
 
 def execute_save_project(arguments):
+    level_saved, assets_saved = False, False
     if arguments.get("save_level", True):
-        unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
+        level_saved = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
+        require(level_saved is True, "Unreal could not save the current level", "save_failed")
     if arguments.get("save_assets", True):
-        unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True, True)
-    return {
-        "level_saved": arguments.get("save_level", True),
-        "assets_saved": arguments.get("save_assets", True),
-    }
-
-
-GRAPH_NODE_ALIASES = {}
+        assets_saved = unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True, True)
+        require(assets_saved is True, "Unreal could not save dirty packages", "save_failed")
+    return {"level_saved": level_saved, "assets_saved": assets_saved}
 
 
 def graph_bridge():
@@ -1883,6 +1718,7 @@ def execute_system_capabilities(arguments):
         "engine_version": str(unreal.SystemLibrary.get_engine_version()),
         "graph_bridge_available": bridge is not None,
         "actions": sorted(ACTION_HANDLERS),
+        "contract_version": _CONTRACT["CONTRACT_VERSION"],
     }
     if bridge is not None:
         data["graph_bridge"] = parse_graph_result(bridge.get_capabilities())
@@ -1892,10 +1728,8 @@ def execute_system_capabilities(arguments):
 def execute_describe_actions(arguments):
     return {
         "harness_version": HARNESS_VERSION,
-        "actions": [
-            {"name": name, "mutating": name in MUTATING_ACTIONS}
-            for name in sorted(ACTION_HANDLERS)
-        ],
+        "actions": _CONTRACT["describe_contract"](),
+        "contract_version": _CONTRACT["CONTRACT_VERSION"],
         "document_options": {
             "dry_run": "Validate and return the expanded execution plan without running commands",
             "recipes": "Expand declarative $repeat, $mirror, and $grid patterns before validation",
@@ -1930,6 +1764,13 @@ def execute_graph_describe_node(arguments):
 
 
 
+def graph_mutation(method, blueprint_path, *arguments):
+    bridge_method = getattr(graph_bridge(), method)
+    # Native code may modify the Blueprint before returning an error or bad JSON.
+    mark_changed(blueprint_path)
+    return parse_graph_result(bridge_method(blueprint_path, *arguments))
+
+
 def execute_graph_add_node(arguments):
     blueprint_path = arguments["blueprint"]
     graph_name = arguments.get("graph", "EventGraph")
@@ -1938,16 +1779,14 @@ def execute_graph_add_node(arguments):
     kind = node.get("kind")
     position = graph_position(arguments)
     require(isinstance(kind, str) and kind, "node.kind must be a non-empty string")
-    raw_result = graph_bridge().add_node(
+    result = graph_mutation("add_node",
         blueprint_path,
         graph_name,
         kind,
         json.dumps(node, ensure_ascii=False),
         position,
     )
-    result = parse_graph_result(raw_result)
     GRAPH_NODE_ALIASES[graph_alias_key(blueprint_path, graph_name, node_id)] = result["node_guid"]
-    mark_changed(blueprint_path)
     result["node_id"] = node_id
     return result
 
@@ -1957,43 +1796,36 @@ def execute_graph_connect(arguments):
     graph_name = arguments.get("graph", "EventGraph")
     source = arguments["from"]
     target = arguments["to"]
-    result = parse_graph_result(
-        graph_bridge().connect_pins(
+    result = graph_mutation("connect_pins",
             blueprint_path,
             graph_name,
             resolve_graph_node(blueprint_path, graph_name, source["node"]),
             source["pin"],
             resolve_graph_node(blueprint_path, graph_name, target["node"]),
             target["pin"],
-        )
     )
-    mark_changed(blueprint_path)
     return result
 
 
 def execute_graph_set_pin_value(arguments):
     blueprint_path = arguments["blueprint"]
     graph_name = arguments.get("graph", "EventGraph")
-    result = parse_graph_result(
-        graph_bridge().set_pin_default_value(
+    result = graph_mutation("set_pin_default_value",
             blueprint_path,
             graph_name,
             resolve_graph_node(blueprint_path, graph_name, arguments["node"]),
             arguments["pin"],
             str(arguments["value"]),
-        )
     )
-    mark_changed(blueprint_path)
     return result
 
 def execute_graph_remove_node(arguments):
     blueprint_path = arguments["blueprint"]
     graph_name = arguments.get("graph", "EventGraph")
-    result = parse_graph_result(graph_bridge().remove_node(
+    result = graph_mutation("remove_node",
         blueprint_path, graph_name,
         resolve_graph_node(blueprint_path, graph_name, arguments.get("node", arguments.get("node_id")))
-    ))
-    mark_changed(blueprint_path)
+    )
     return result
 
 
@@ -2015,10 +1847,9 @@ def execute_graph_disconnect(arguments):
         from_pin = source["pin"]
         to_node = resolve_graph_node(blueprint_path, graph_name, target["node"])
         to_pin = target["pin"]
-    result = parse_graph_result(graph_bridge().disconnect_pins(
+    result = graph_mutation("disconnect_pins",
         blueprint_path, graph_name, from_node, from_pin, to_node, to_pin, all_links
-    ))
-    mark_changed(blueprint_path)
+    )
     return result
 
 
@@ -2085,97 +1916,13 @@ ACTION_HANDLERS = {
     "recipe.execute": execute_recipe_execute,
 }
 
-MUTATING_ACTIONS = {
-    "object.set",
-    "object.call",
-    "content.create_folder",
-    "asset.create",
-    "material.create",
-    "material_instance.create",
-    "material_instance.set_parameters",
-    "blueprint.create",
-    "blueprint.compile",
-    "blueprint.edit",
-    "blueprint.graph.add_node",
-    "blueprint.graph.connect",
-    "blueprint.graph.set_pin_value",
-    "blueprint.graph.remove_node",
-    "blueprint.graph.disconnect",
-    "asset.duplicate",
-    "asset.save",
-    "level.spawn_actor",
-    "level.set_actor_transform",
-    "level.set_actor_property",
-    "project.save",
-}
-
-
-ACTION_ARGUMENTS = {
-    "system.capabilities": (), "system.describe_actions": (), "object.describe": ("object", "limit"),
-    "object.describe_functions": ("object", "limit"), "object.call": ("object", "function", "arguments"),
-    "object.inspect": ("object", "properties", "depth"), "object.set": ("object", "properties"),
-    "content.create_folder": ("path", "conflict_mode"), "content.list": ("path", "recursive", "limit", "query"),
-    "asset.inspect": ("asset",), "asset.search": ("path", "query", "class", "limit", "offset", "recursive"),
-    "asset.describe_types": ("limit", "offset"), "asset.create": ("folder", "name", "conflict_mode", "class", "asset_class", "factory", "replace_existing"),
-    "asset.duplicate": ("source", "destination"), "asset.save": ("assets", "asset_paths", "packages", "package_paths"),
-    "material.create": ("folder", "name", "conflict_mode", "base_color", "metallic", "roughness", "replace_existing"),
-    "material.inspect": ("material",), "material_instance.create": ("folder", "name", "parent"),
-    "material_instance.set_parameters": ("material_instance", "scalar", "vector", "static_switch"),
-    "blueprint.create": ("folder", "name", "parent_class", "conflict_mode", "replace_existing"),
-    "blueprint.inspect": ("blueprint",), "graph.describe": ("blueprint", "graph"),
-    "backend.capabilities": (), "backend.describe": ("backend",), "backend.operation": ("backend", "operation", "payload"),
-    "graph.search_nodes": ("blueprint", "graph", "query"), "graph.describe_node": ("kind",),
-    "blueprint.compile": ("blueprint", "save"), "blueprint.edit": ("blueprint", "operations", "compile", "save", "conflict_mode"),
-    "blueprint.graph.inspect": ("blueprint", "graph"), "blueprint.graph.add_node": ("blueprint", "graph", "node_id", "node", "position"),
-    "blueprint.graph.connect": ("blueprint", "graph", "from", "to"), "blueprint.graph.set_pin_value": ("blueprint", "graph", "node", "pin", "value"),
-    "blueprint.graph.remove_node": ("blueprint", "graph", "node", "node_id"), "blueprint.graph.disconnect": ("blueprint", "graph", "from", "to", "all", "node", "pin"),
-    "level.inspect": ("query", "class", "selected_only", "limit"), "level.spawn_actor": ("level", "class", "transform", "actor_label", "actor_name", "conflict_mode"),
-    "level.set_actor_transform": ("actor_name", "actor_label", "transform"), "level.set_actor_property": ("actor_name", "actor_label", "property", "value"),
-    "project.save": ("save_level", "save_assets"), "recipe.validate": ("recipe",), "recipe.execute": ("recipe",),
-}
+MUTATING_ACTIONS = _CONTRACT["MUTATING_ACTIONS"]
+ACTION_ARGUMENTS = _CONTRACT["ACTION_ARGUMENTS"]
 
 
 def validate_document(document):
-    require(isinstance(document, dict), "Document root must be an object", "invalid_document")
-    require(document.get("format_version") == "1.0", "Unsupported format_version", "unsupported_format")
-    commands = document.get("commands")
-    require(isinstance(commands, list), "'commands' must be an array", "invalid_document")
-    require(len(commands) <= MAX_COMMANDS, "Too many commands; maximum is " + str(MAX_COMMANDS), "too_many_commands")
-    seen = set()
-    for index, command in enumerate(commands):
-        require(isinstance(command, dict), "Command at index {} must be an object".format(index), "invalid_command")
-        command_id = command.get("id")
-        action = command.get("action")
-        require(isinstance(command_id, str) and command_id, "Command id must be a non-empty string", "invalid_command")
-        require(action in ACTION_HANDLERS, "Unsupported action: " + str(action), "unsupported_action")
-        arguments = command.get("arguments", {})
-        require(isinstance(arguments, dict), "arguments must be an object: " + command_id, "invalid_arguments")
-        allowed_command_fields = {"id", "action", "arguments", "depends_on", "condition", "recipe_id", "conflict_mode"}
-        require(not (set(command) - allowed_command_fields), "Unknown command fields", "invalid_command")
-        allowed_arguments = set(ACTION_ARGUMENTS[action]) | {"conflict_mode"}
-        require(not (set(arguments) - allowed_arguments), "Unknown arguments for " + action, "invalid_arguments")
-        required_arguments = {
-            "object.call": ("object", "function"), "object.inspect": ("object", "properties"), "object.set": ("object", "properties"),
-            "content.create_folder": ("path",), "asset.inspect": ("asset",), "material.inspect": ("material",),
-            "material_instance.create": ("folder", "name", "parent"), "blueprint.inspect": ("blueprint",),
-            "graph.describe": ("blueprint",), "backend.describe": ("backend",), "backend.operation": ("backend", "operation"),
-            "graph.describe_node": ("kind",), "blueprint.compile": ("blueprint",), "blueprint.edit": ("blueprint", "operations"),
-            "blueprint.graph.inspect": ("blueprint",), "blueprint.graph.add_node": ("blueprint", "node_id", "node"),
-            "blueprint.graph.connect": ("blueprint", "from", "to"), "blueprint.graph.set_pin_value": ("blueprint", "node", "pin", "value"),
-            "level.spawn_actor": ("class",), "level.set_actor_property": ("property", "value"),
-            "recipe.validate": ("recipe",), "recipe.execute": ("recipe",),
-        }.get(action, ())
-        require(all(key in arguments for key in required_arguments), "Missing required arguments for " + action, "missing_argument")
-        require(command_id not in seen, "Duplicate command id: " + command_id, "duplicate_command_id")
-        require(action in ACTION_HANDLERS, "Unsupported action: " + str(action), "unsupported_action")
-        dependencies = command.get("depends_on", [])
-        require(isinstance(dependencies, list) and all(isinstance(item, str) for item in dependencies), "depends_on must be an array of strings", "invalid_dependencies")
-        missing = [item for item in dependencies if item not in seen]
-        require(not missing, "Dependencies must refer to earlier commands: " + ", ".join(missing), "invalid_dependencies")
-        if "condition" in command:
-            require(isinstance(command["condition"], dict), "condition must be an object", "invalid_condition")
-        seen.add(command_id)
-    return commands
+    _CONTRACT["validate_document"](document, expanded=True)
+    return document["commands"]
 
 
 def execute_command(command):
@@ -2192,8 +1939,9 @@ def execute_command(command):
     handler = ACTION_HANDLERS.get(action)
     require(handler is not None, "Unsupported action: " + action)
     arguments = resolve_result_reference(command.get("arguments", {}))
+    validate_action_arguments(action, arguments, allow_refs=False)
     log("Executing: " + command_id + " -> " + action)
-    if action in MUTATING_ACTIONS and ACTIVE_RECIPE_TRANSACTION is None:
+    if _CONTRACT["is_mutating"](command) and action != "recipe.execute" and ACTIVE_RECIPE_TRANSACTION is None:
         transaction = unreal.ScopedEditorTransaction("Codex: " + action)
         try:
             data = handler(arguments)
@@ -2214,6 +1962,7 @@ def execute_command(command):
 def main():
     global RESULT_CONTEXT
     RESULT_CONTEXT = {}
+    GRAPH_NODE_ALIASES.clear()
     result = {
         "format_version": "1.0",
         "harness_version": HARNESS_VERSION,
@@ -2229,6 +1978,8 @@ def main():
         document = load_json_file(ACTIONS_FILE)
         if isinstance(document, dict) and isinstance(document.get("run_id"), str):
             result["run_id"] = document["run_id"]
+        require(set(ACTION_HANDLERS) == set(_CONTRACT["ACTION_SCHEMAS"]),
+                "Installed executor and action contract are incompatible", "contract_mismatch")
         document, recipe_summaries = expand_document_recipes(document)
         result["recipes"] = recipe_summaries
         commands = validate_document(document)
@@ -2251,13 +2002,18 @@ def main():
             command_id = command.get("id", "<missing id>")
             failed_dependencies = [
                 dependency
-                for dependency in command.get("depends_on", [])
+                for dependency in set(command.get("depends_on", [])) | {
+                    ref.split(".", 1)[0] for ref in _CONTRACT["references"](command.get("arguments", {}))
+                    if command.get("action") not in {"recipe.execute", "recipe.validate"}
+                }
                 if command_status.get(dependency) is not True
             ]
-            if failed_dependencies:
+            blocked = not result["success"] and _CONTRACT["is_mutating"](command)
+            if failed_dependencies or blocked:
                 dependency_error = HarnessError(
-                    "dependency_failed",
-                    "Failed dependencies: " + ", ".join(failed_dependencies),
+                    "dependency_failed" if failed_dependencies else "execution_blocked",
+                    "Failed dependencies: " + ", ".join(sorted(failed_dependencies)) if failed_dependencies
+                    else "Mutation/save blocked after an earlier batch failure",
                 )
                 result["commands"].append(
                     {
@@ -2273,6 +2029,7 @@ def main():
                 )
                 command_status[command_id] = False
                 result["success"] = False
+                result["errors"].append(error_record(dependency_error, command_id))
                 continue
             try:
                 command_result = execute_command(command)
@@ -2302,6 +2059,8 @@ def main():
         result["errors"].append(error_record(error, None, True))
         log_error(str(error))
 
+    result["audit_path"] = RESULT_FILE
+    result["partial_changes"] = not result["success"] and bool(result["changed_objects"])
     result["finished_at"] = datetime.now(timezone.utc).isoformat()
     save_json_file(RESULT_FILE, result)
     if result["success"]:

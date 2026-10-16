@@ -1,0 +1,13 @@
+include run.ps1
+include Start.cmd
+recursive-include scripts *.py
+recursive-include docs *.md *.json
+recursive-include evals *.json
+recursive-include tests *.py *.json
+recursive-include templates *.py *.json *.uproject *.uplugin *.cs *.h *.cpp *.ini
+recursive-include .agents *.md *.yaml
+include examples/benchmark-tasks.json
+include examples/numeric-blueprint.json
+include examples/patterned-castle.json
+include examples/hooks.json
+include examples/hooks.py

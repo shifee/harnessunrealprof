@@ -16,5 +16,14 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
 ]
 
+[project.scripts]
+unreal-harness = "unreal_harness.cli:main"
+
+[project.optional-dependencies]
+dev = ["build", "ruff"]
+
 [tool.setuptools]
 py-modules = []
+
+[tool.setuptools.packages.find]
+include = ["unreal_harness*"]

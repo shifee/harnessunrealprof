@@ -13,9 +13,9 @@ class ProviderContractTests(unittest.TestCase):
             "http://localhost/chat/completions", 400, "Bad Request", {},
             BytesIO(b'{"error":"response_format.type must be json_schema or text"}'),
         )
-        response = {"choices": [{"message": {"content": '{"commands": []}'}}]}
+        response = {"choices": [{"message": {"content": '{"commands": [{"id":"read","action":"level.inspect","arguments":{}}]}'}}]}
         with patch.object(planner, "_request", side_effect=[unsupported, response]) as request:
-            self.assertEqual(planner("inspect", {"capabilities": {"actions": ["level.inspect"]}}), {"commands": []})
+            self.assertEqual(planner("inspect", {"capabilities": {"actions": ["level.inspect"]}}), {"commands": [{"id": "read", "action": "level.inspect", "arguments": {}}]})
         self.assertIn("response_format", request.call_args_list[0].args[0])
         retry_format = request.call_args_list[1].args[0]["response_format"]
         self.assertEqual(retry_format["type"], "json_schema")

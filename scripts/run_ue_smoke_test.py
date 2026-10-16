@@ -23,10 +23,11 @@ def parse_args(argv=None):
     parser.add_argument("--project", required=True, type=Path, help="Path to the test .uproject")
     parser.add_argument("--editor-cmd", type=Path, help="Path to UnrealEditor-Cmd executable")
     parser.add_argument("--namespace", help="Unique asset folder name under /Game/CodexHarnessSmoke")
-    parser.add_argument("--recovery", action="store_true", help="Verify failed compile and same-Blueprint repair")
-    parser.add_argument("--asset-create", action="store_true", help="Verify native asset.create, registry visibility, conflict safety, and explicit save")
-    parser.add_argument("--native-reflection", action="store_true", help="Verify native UObject reflection, typed mutation, and preflight rollback")
-    parser.add_argument("--material", action="store_true", help="Verify native material and Blueprint material assignment")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--recovery", action="store_true", help="Verify failed compile and same-Blueprint repair")
+    mode.add_argument("--asset-create", action="store_true", help="Verify native asset.create, registry visibility, conflict safety, and explicit save")
+    mode.add_argument("--native-reflection", action="store_true", help="Verify native UObject reflection, typed mutation, and preflight rollback")
+    mode.add_argument("--material", action="store_true", help="Verify native material and Blueprint material assignment")
     parser.add_argument("--reopen", action="store_true", help="Run a second Unreal process to inspect the saved Blueprint or material")
     return parser.parse_args(argv)
 
@@ -296,6 +297,17 @@ def validate_material_reopen_result(result):
     commands = {item["id"]: item for item in result["commands"]}
     if commands["instance"]["data"].get("parent", "") == "":
         raise AssertionError("Reopened material instance has no parent")
+    values = {item["name"]: item.get("value") for item in commands["instance"]["data"].get("scalar_parameters", [])}
+    if abs(values.get("Metallic", -1.0) - 0.65) > 0.0001 or abs(values.get("Roughness", -1.0) - 0.15) > 0.0001:
+        raise AssertionError("Material instance scalar values did not survive reopening")
+    colors = {item["name"]: item.get("value") for item in commands["instance"]["data"].get("vector_parameters", [])}
+    actual = colors.get("BaseColor", [])
+    if len(actual) != 4 or any(abs(a - b) > 0.0001 for a, b in zip(actual, [0.8, 0.1, 0.05, 1.0])):
+        raise AssertionError("Material instance color did not survive reopening")
+    if commands["material"]["data"].get("expression_count") != 3:
+        raise AssertionError("Material expressions did not survive reopening")
+    if not any(component.get("materials") for component in commands["blueprint"]["data"].get("components", [])):
+        raise AssertionError("Blueprint material assignment did not survive reopening")
     if result.get("changed_objects"):
         raise AssertionError("Read-only material reopen reported mutations")
 def asset_create_document(namespace):
@@ -368,13 +380,45 @@ def recovery_document(namespace):
         {"id": "invalid_cast", "action": "blueprint.graph.add_node", "depends_on": ["compile"], "arguments": {"blueprint": blueprint, "graph": "EventGraph", "node_id": "invalid_cast", "node": {"kind": "dynamic_cast", "target_class": "/Script/Engine.Actor"}, "position": [700, 0]}},
         {"id": "cast_wire", "action": "blueprint.graph.connect", "depends_on": ["invalid_cast"], "arguments": {"blueprint": blueprint, "graph": "EventGraph", "from": {"node": "begin_play", "pin": "then"}, "to": {"node": "invalid_cast", "pin": "execute"}}},
         {"id": "invalid_compile", "action": "blueprint.compile", "depends_on": ["cast_wire"], "arguments": {"blueprint": blueprint, "save": False}},
-        {"id": "remove_invalid_cast", "action": "blueprint.graph.remove_node", "arguments": {"blueprint": blueprint, "graph": "EventGraph", "node": "invalid_cast"}},
-        {"id": "recovered_compile", "action": "blueprint.compile", "depends_on": ["remove_invalid_cast"], "arguments": {"blueprint": blueprint, "save": False}},
-        {"id": "recovered_inspect", "action": "blueprint.graph.inspect", "depends_on": ["recovered_compile"], "arguments": {"blueprint": blueprint, "graph": "EventGraph"}},
-        {"id": "recovery_save", "action": "project.save", "depends_on": ["recovered_compile"], "arguments": {"save_level": False, "save_assets": True}},
-        {"id": "reopened_inspect", "action": "blueprint.graph.inspect", "depends_on": ["recovery_save"], "arguments": {"blueprint": blueprint, "graph": "EventGraph"}},
+        {"id": "failure_inspect", "action": "blueprint.graph.inspect", "arguments": {"blueprint": blueprint, "graph": "EventGraph"}},
+        {"id": "blocked_save", "action": "asset.save", "arguments": {"assets": [blueprint]}},
     ])
     return document
+
+
+def recovery_followup_document(namespace, node_guid):
+    blueprint = "/Game/CodexHarnessSmoke/{}/BP_Smoke.BP_Smoke".format(namespace)
+    return {"format_version": "1.0", "run_id": "codex-recovery-followup-" + uuid.uuid4().hex, "commands": [
+        {"id": "reconcile", "action": "blueprint.graph.inspect", "arguments": {"blueprint": blueprint, "graph": "EventGraph"}},
+        {"id": "remove_invalid_cast", "action": "blueprint.graph.remove_node", "depends_on": ["reconcile"], "arguments": {"blueprint": blueprint, "graph": "EventGraph", "node": node_guid}},
+        {"id": "recovered_compile", "action": "blueprint.compile", "depends_on": ["remove_invalid_cast"], "arguments": {"blueprint": blueprint, "save": False}},
+        {"id": "recovered_inspect", "action": "blueprint.graph.inspect", "depends_on": ["recovered_compile"], "arguments": {"blueprint": blueprint, "graph": "EventGraph"}},
+        {"id": "recovery_save", "action": "asset.save", "depends_on": ["recovered_compile"], "arguments": {"assets": [blueprint]}},
+    ]}
+
+
+def recovery_runner_source(executor, actions, result_path, namespace):
+    # The real executor remains authoritative; the test controller runs two
+    # batches in one Editor process so unsaved partial state survives inspection.
+    return "import json, runpy\nfrom pathlib import Path\n" + (
+        "actions=Path({actions!r})\nresult=Path({result!r})\n"
+        "runtime=runpy.run_path({executor!r}, run_name='__main__')\n"
+        "initial=json.loads(result.read_text(encoding='utf-8'))\n"
+        "commands={{c['id']:c for c in initial['commands']}}\n"
+        "assert commands['invalid_compile'].get('error_code') == 'blueprint_compile_failed', 'Expected compile failure missing'\n"
+        "assert commands['blocked_save'].get('error_code') == 'execution_blocked', 'Post-error save was not blocked'\n"
+        "guid=commands['invalid_cast']['data']['node_guid']\n"
+        "assert any(n['guid']==guid for n in commands['failure_inspect']['data']['nodes']), 'Failed node not found in inspection'\n"
+        "followup={followup!r}\n"
+        "followup['commands'][1]['arguments']['node']=guid\n"
+        "actions.write_text(json.dumps(followup),encoding='utf-8')\n"
+        "runtime['main']()\n"
+        "recovered=json.loads(result.read_text(encoding='utf-8'))\n"
+        "recovered['initial']=initial\n"
+        "recovered['run_id']=initial['run_id']\n"
+        "result.write_text(json.dumps(recovered),encoding='utf-8')\n"
+    ).format(actions=actions.as_posix(), result=result_path.as_posix(), executor=executor.as_posix(),
+             followup=recovery_followup_document(namespace, 'INSPECTED_GUID'))
 
 
 def reopen_document(namespace):
@@ -469,19 +513,35 @@ def validate_native_result(result):
 
 
 def validate_recovery_result(result):
-    if result.get("success") is not False:
-        raise AssertionError("Recovery batch should contain an intentional compile failure")
-    commands = {item["id"]: item for item in result.get("commands", [])}
-    if commands.get("invalid_compile", {}).get("error_code") != "blueprint_compile_failed":
+    initial = result.get("initial", {})
+    if initial.get("success") is not False:
+        raise AssertionError("Initial recovery batch should contain an intentional compile failure")
+    failed = {item["id"]: item for item in initial.get("commands", [])}
+    if failed.get("invalid_compile", {}).get("error_code") != "blueprint_compile_failed":
         raise AssertionError("Invalid Blueprint compile failure was not observed")
-    for command_id in ("recovered_compile", "recovered_inspect", "recovery_save", "reopened_inspect"):
+    if failed.get("blocked_save", {}).get("error_code") != "execution_blocked":
+        raise AssertionError("Initial save was not blocked after failure")
+    if not failed.get("failure_inspect", {}).get("success"):
+        raise AssertionError("Failed state was not inspected")
+    commands = {item["id"]: item for item in result.get("commands", [])}
+    if result.get("success") is not True:
+        raise AssertionError("Follow-up recovery batch failed")
+    for command_id in ("reconcile", "remove_invalid_cast", "recovered_compile", "recovered_inspect", "recovery_save"):
         if commands.get(command_id, {}).get("success") is not True:
             raise AssertionError("Recovery command failed: " + command_id)
     if not result.get("changed_objects"):
         raise AssertionError("Recovery mutation audit was empty")
 
+
 def main(argv=None):
     args = parse_args(argv)
+    sys.path.insert(0, str(REPO_ROOT))
+    from unreal_harness.execution import commandlet_session
+    with commandlet_session(args.project.expanduser().resolve().parent):
+        return run_smoke(args)
+
+
+def run_smoke(args):
     project = args.project.expanduser().resolve()
     if not project.is_file() or project.suffix.lower() != ".uproject":
         raise ValueError("Invalid .uproject path: {}".format(project))
@@ -497,6 +557,7 @@ def main(argv=None):
     namespace = args.namespace or "Run_{}_{}".format(
         datetime.now().strftime("%Y%m%d_%H%M%S"), uuid.uuid4().hex[:6]
     )
+    runner_path = None
     backups = {}
     for path in (actions, result_path):
         backups[path] = path.read_bytes() if path.exists() else None
@@ -515,11 +576,16 @@ def main(argv=None):
             json.dumps(document, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        script = executor
+        if args.recovery:
+            runner_path = python_dir / ("smoke_recovery_" + uuid.uuid4().hex + ".py")
+            runner_path.write_text(recovery_runner_source(executor, actions, result_path, namespace), encoding="utf-8")
+            script = runner_path
         command = [
             str(editor),
             str(project),
             "-run=pythonscript",
-            "-script={}".format(executor),
+            "-script={}".format(script.as_posix()),
             "-unattended",
             "-nop4",
             "-nosplash",
@@ -543,7 +609,7 @@ def main(argv=None):
             raise AssertionError("Unreal commandlet timed out") from error
         expected_partial_failure = args.native_reflection or args.asset_create or args.recovery
         if completed.returncode != 0 and not (expected_partial_failure and result_path.is_file()):
-            raise AssertionError("Unreal commandlet exited with status {}".format(completed.returncode))
+            raise AssertionError("Unreal commandlet exited with status {}\n{}".format(completed.returncode, (completed.stdout or "")[-4000:]))
         if not result_path.is_file():
             raise AssertionError("Unreal did not write result.json")
         result = json.loads(result_path.read_text(encoding="utf-8-sig"))
@@ -563,13 +629,15 @@ def main(argv=None):
             validate_recovery_result(result)
         else:
             validate_result(result)
-        if args.reopen and not args.recovery:
+        if args.reopen:
             if args.material:
                 reopen = material_reopen_document(namespace)
             elif args.asset_create:
                 reopen = asset_reopen_document(namespace)
             else:
                 reopen = reopen_document(namespace)
+            if args.recovery:
+                command[3] = "-script=" + executor.as_posix()
             reopen_id = reopen["run_id"]
             result_path.unlink(missing_ok=True)
             actions.write_text(json.dumps(reopen, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -592,6 +660,8 @@ def main(argv=None):
         print("Changed objects: {}".format(len(result["changed_objects"])))
         return 0
     finally:
+        if runner_path is not None:
+            runner_path.unlink(missing_ok=True)
         for path, content in backups.items():
             if content is None:
                 if path.exists():

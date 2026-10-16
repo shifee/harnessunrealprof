@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": [
+    {
+      "name": "deny-generic-calls",
+      "event": "before_action",
+      "actions": ["object.call", "backend.operation", "recipe.execute"],
+      "command": ["py", "hooks.py", "guard"],
+      "timeout": 5
+    },
+    {
+      "name": "local-task-log",
+      "event": "on_task_complete",
+      "command": ["py", "hooks.py", "log"],
+      "timeout": 5
+    }
+  ]
+}

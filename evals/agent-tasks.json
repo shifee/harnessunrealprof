@@ -1,0 +1,233 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "create_folder",
+      "task": "Создай папку {root}/Target в Content Browser.",
+      "criteria": [
+        {
+          "id": "folder",
+          "description": "Requested folder exists",
+          "command": {
+            "id": "folder",
+            "action": "content.list",
+            "arguments": {
+              "path": "{root}/Target"
+            }
+          },
+          "path": "directory_exists",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "blue_material",
+      "task": "Создай материал M_Blue в {root}/Materials: BaseColor [0,0,1,1], Metallic 1, Roughness 0.25. Сохрани его.",
+      "criteria": [
+        {
+          "id": "metallic",
+          "description": "Metallic is 1",
+          "command": {
+            "id": "metallic",
+            "action": "material.inspect",
+            "arguments": {
+              "material": "{root}/Materials/M_Blue.M_Blue"
+            }
+          },
+          "path": "scalar_parameters",
+          "operator": "contains",
+          "value": {
+            "name": "Metallic",
+            "value": 1
+          }
+        },
+        {
+          "id": "roughness",
+          "description": "Roughness is 0.25",
+          "command": {
+            "id": "roughness",
+            "action": "material.inspect",
+            "arguments": {
+              "material": "{root}/Materials/M_Blue.M_Blue"
+            }
+          },
+          "path": "scalar_parameters",
+          "operator": "contains",
+          "value": {
+            "name": "Roughness",
+            "value": 0.25
+          }
+        },
+        {
+          "id": "blue",
+          "description": "BaseColor is blue",
+          "command": {
+            "id": "blue",
+            "action": "material.inspect",
+            "arguments": {
+              "material": "{root}/Materials/M_Blue.M_Blue"
+            }
+          },
+          "path": "vector_parameters",
+          "operator": "contains",
+          "value": {
+            "name": "BaseColor",
+            "value": [
+              0,
+              0,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "id": "saved",
+          "description": "Material package file exists on disk",
+          "command": {
+            "id": "saved",
+            "action": "asset.inspect",
+            "arguments": {
+              "asset": "{root}/Materials/M_Blue.M_Blue"
+            }
+          },
+          "path": "exists_on_disk",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "inspect_material",
+      "task": "Прочитай и покажи параметры материала {root}/Materials/M_Blue.M_Blue.",
+      "read_only": true,
+      "setup": {
+        "commands": [
+          {
+            "id": "setup_material",
+            "action": "material.create",
+            "arguments": {
+              "folder": "{root}/Materials",
+              "name": "M_Blue",
+              "base_color": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "metallic": 1,
+              "roughness": 0.25
+            }
+          }
+        ]
+      },
+      "criteria": [
+        {
+          "id": "metallic",
+          "description": "Metallic is 1",
+          "command": {
+            "id": "metallic",
+            "action": "material.inspect",
+            "arguments": {
+              "material": "{root}/Materials/M_Blue.M_Blue"
+            }
+          },
+          "path": "scalar_parameters",
+          "operator": "contains",
+          "value": {
+            "name": "Metallic",
+            "value": 1
+          }
+        },
+        {
+          "id": "roughness",
+          "description": "Roughness is 0.25",
+          "command": {
+            "id": "roughness",
+            "action": "material.inspect",
+            "arguments": {
+              "material": "{root}/Materials/M_Blue.M_Blue"
+            }
+          },
+          "path": "scalar_parameters",
+          "operator": "contains",
+          "value": {
+            "name": "Roughness",
+            "value": 0.25
+          }
+        },
+        {
+          "id": "blue",
+          "description": "BaseColor is blue",
+          "command": {
+            "id": "blue",
+            "action": "material.inspect",
+            "arguments": {
+              "material": "{root}/Materials/M_Blue.M_Blue"
+            }
+          },
+          "path": "vector_parameters",
+          "operator": "contains",
+          "value": {
+            "name": "BaseColor",
+            "value": [
+              0,
+              0,
+              1,
+              1
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit_existing",
+      "task": "У существующего материала {root}/Materials/M_Blue.M_Blue включи свойство two_sided и сохрани материал. Не создавай замену.",
+      "setup": {
+        "commands": [
+          {
+            "id": "setup_material",
+            "action": "material.create",
+            "arguments": {
+              "folder": "{root}/Materials",
+              "name": "M_Blue",
+              "base_color": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "metallic": 1,
+              "roughness": 0.25
+            }
+          }
+        ]
+      },
+      "criteria": [
+        {
+          "id": "two_sided",
+          "description": "Existing material is two-sided",
+          "command": {
+            "id": "two_sided",
+            "action": "object.inspect",
+            "arguments": {
+              "object": "{root}/Materials/M_Blue.M_Blue",
+              "properties": [
+                "two_sided"
+              ]
+            }
+          },
+          "path": "properties.two_sided",
+          "operator": "equals",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "unsupported_mesh",
+      "task": "Сгенерируй с нуля новую сложную органическую 3D-геометрию в виде Skeletal Mesh и новые анимации только по этому тексту, без исходных файлов.",
+      "expected": "unsupported",
+      "criteria": []
+    }
+  ]
+}

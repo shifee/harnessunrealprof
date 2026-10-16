@@ -53,10 +53,23 @@ def dry_run(document):
     commands = document["commands"]
     if len({c.get("id") for c in commands}) != len(commands) or any(not c.get("id") for c in commands):
         return {"success": False, "errors": [{"code": "invalid_command_id"}]}
+    sys.path.insert(0, str(ROOT))
+    from unreal_harness.action_contract import validate_document, ActionValidationError
+    try:
+        validate_document(document)
+    except ActionValidationError as error:
+        return {"success": False, "errors": [{"code": error.code, "message": str(error)}]}
     return {"success": True, "dry_run": True, "plan": [{"id": c["id"], "action": c["action"]} for c in commands]}
 
 
 def run_native(document, project, editor):
+    sys.path.insert(0, str(ROOT))
+    from unreal_harness.execution import commandlet_session
+    with commandlet_session(Path(project).resolve().parent):
+        return _run_native(document, project, editor)
+
+
+def _run_native(document, project, editor):
     import shutil
     project = Path(project).resolve()
     if project.suffix != ".uproject" or not project.is_file():
@@ -76,13 +89,13 @@ def run_native(document, project, editor):
         document = dict(document, run_id=run_id)
         result.unlink(missing_ok=True)
         actions.write_text(json.dumps(document), encoding="utf-8")
-        completed = subprocess.run([executable, str(project), "-run=pythonscript", "-script=" + str(executor), "-unattended", "-nop4", "-nosplash", "-NullRHI"], cwd=str(project.parent), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180, check=False)
+        completed = subprocess.run([executable, str(project), "-run=pythonscript", "-script=" + Path(executor).as_posix(), "-unattended", "-nop4", "-nosplash", "-NullRHI"], cwd=str(project.parent), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180, check=False)
         if not result.is_file():
             return {"success": False, "errors": [{"code": "missing_result" if completed.returncode == 0 else "commandlet_failed"}]}
         envelope = json.loads(result.read_text(encoding="utf-8-sig"))
         if envelope.get("run_id") != run_id:
             return {"success": False, "errors": [{"code": "stale_result"}]}
-        if completed.returncode != 0:
+        if completed.returncode != 0 and envelope.get("success") is not False:
             return {"success": False, "errors": [{"code": "commandlet_failed", "returncode": completed.returncode}], "result": envelope}
         return envelope
     finally:

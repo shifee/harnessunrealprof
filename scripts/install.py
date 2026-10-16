@@ -43,6 +43,7 @@ def parse_args(argv=None):
     group.add_argument("--project-dir", type=Path, help="Directory containing a .uproject")
     parser.add_argument("--dry-run", action="store_true", help="Show changes without writing")
     parser.add_argument("--force", action="store_true", help="Back up and replace conflicts")
+    parser.add_argument("--runtime-only", action="store_true", help="Update Python runtime with backups, preserving commands, skills and plugins")
     parser.add_argument(
         "--enable-plugins",
         action="store_true",
@@ -152,6 +153,9 @@ def backup_path(path):
 
 
 def copy_file(source, destination, dry_run, force, report):
+    if destination.exists() and source.read_bytes() == destination.read_bytes():
+        report["skipped"].append(destination)
+        return
     if destination.exists() and not force:
         report["skipped"].append(destination)
         return
@@ -252,6 +256,8 @@ def install(args):
         "plugins_enabled": [],
     }
     mappings = [
+        (REPO_ROOT / "unreal_harness/action_contract.py", project_root / "Content/Python/action_contract.py"),
+        (TEMPLATE_ROOT / "Content/Python/backend_registry.py", project_root / "Content/Python/backend_registry.py"),
         (TEMPLATE_ROOT / "Content/Python/execute_actions.py", project_root / "Content/Python/execute_actions.py"),
         (TEMPLATE_ROOT / "Content/Python/init_unreal.py", project_root / "Content/Python/init_unreal.py"),
         (TEMPLATE_ROOT / "Content/Python/actions.example.json", project_root / "Content/Python/actions.json"),
@@ -262,10 +268,15 @@ def install(args):
     plugin_root = TEMPLATE_ROOT / "Plugins/UnrealCodexGraph"
     for source in sorted(path for path in plugin_root.rglob("*") if path.is_file()):
         mappings.append((source, project_root / source.relative_to(TEMPLATE_ROOT)))
+    runtime_only = getattr(args, "runtime_only", False)
+    if runtime_only:
+        if args.enable_plugins or args.enable_native_mcp:
+            raise ValueError("--runtime-only cannot change plugins; omit --enable-plugins and --enable-native-mcp")
+        mappings = [(source, target) for source, target in mappings if target.parent == project_root / "Content/Python" and target.suffix == ".py"]
     for source, destination in mappings:
         if not source.is_file():
             raise ValueError("Distribution file missing: {}".format(source))
-        copy_file(source, destination, args.dry_run, args.force, report)
+        copy_file(source, destination, args.dry_run, args.force or runtime_only, report)
 
     plugins_to_enable = []
     if args.enable_plugins:

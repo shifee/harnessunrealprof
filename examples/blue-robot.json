@@ -1,0 +1,252 @@
+{
+  "format_version": "1.0",
+  "dry_run": false,
+  "commands": [
+    {
+      "id": "create_character",
+      "action": "blueprint.create",
+      "arguments": {
+        "folder": "/Game/Characters",
+        "name": "BP_BlueRobot",
+        "parent_class": "/Script/Engine.Actor",
+        "conflict_mode": "fail"
+      }
+    },
+    {
+      "id": "build_character",
+      "action": "blueprint.edit",
+      "depends_on": [
+        "create_character"
+      ],
+      "arguments": {
+        "blueprint": "/Game/Characters/BP_BlueRobot.BP_BlueRobot",
+        "operations": [
+          {
+            "operation": "add_component",
+            "component_type": "/Script/Engine.StaticMeshComponent",
+            "component_name": "Torso",
+            "attach_to": "DefaultSceneRoot"
+          },
+          {
+            "operation": "set_component_property",
+            "component_name": "Torso",
+            "property": "static_mesh",
+            "value": "/Engine/BasicShapes/Cube.Cube"
+          },
+          {
+            "operation": "set_component_material",
+            "component_name": "Torso",
+            "slot": 0,
+            "material": "/Game/Materials/M_BlueMetal.M_BlueMetal"
+          },
+          {
+            "operation": "set_component_transform",
+            "component_name": "Torso",
+            "location": [
+              0,
+              0,
+              130
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              0.5,
+              0.65,
+              0.8
+            ]
+          },
+          {
+            "operation": "add_component",
+            "component_type": "/Script/Engine.StaticMeshComponent",
+            "component_name": "Head",
+            "attach_to": "DefaultSceneRoot"
+          },
+          {
+            "operation": "set_component_property",
+            "component_name": "Head",
+            "property": "static_mesh",
+            "value": "/Engine/BasicShapes/Sphere.Sphere"
+          },
+          {
+            "operation": "set_component_material",
+            "component_name": "Head",
+            "slot": 0,
+            "material": "/Game/Materials/M_BlueMetal.M_BlueMetal"
+          },
+          {
+            "operation": "set_component_transform",
+            "component_name": "Head",
+            "location": [
+              0,
+              0,
+              215
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              0.45,
+              0.45,
+              0.45
+            ]
+          },
+          {
+            "operation": "add_component",
+            "component_type": "/Script/Engine.StaticMeshComponent",
+            "component_name": "LeftArm",
+            "attach_to": "DefaultSceneRoot"
+          },
+          {
+            "operation": "set_component_property",
+            "component_name": "LeftArm",
+            "property": "static_mesh",
+            "value": "/Engine/BasicShapes/Cube.Cube"
+          },
+          {
+            "operation": "set_component_material",
+            "component_name": "LeftArm",
+            "slot": 0,
+            "material": "/Game/Materials/M_BlueMetal.M_BlueMetal"
+          },
+          {
+            "operation": "set_component_transform",
+            "component_name": "LeftArm",
+            "location": [
+              0,
+              -65,
+              135
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              0.22,
+              0.22,
+              0.7
+            ]
+          },
+          {
+            "operation": "add_component",
+            "component_type": "/Script/Engine.StaticMeshComponent",
+            "component_name": "RightArm",
+            "attach_to": "DefaultSceneRoot"
+          },
+          {
+            "operation": "set_component_property",
+            "component_name": "RightArm",
+            "property": "static_mesh",
+            "value": "/Engine/BasicShapes/Cube.Cube"
+          },
+          {
+            "operation": "set_component_material",
+            "component_name": "RightArm",
+            "slot": 0,
+            "material": "/Game/Materials/M_BlueMetal.M_BlueMetal"
+          },
+          {
+            "operation": "set_component_transform",
+            "component_name": "RightArm",
+            "location": [
+              0,
+              65,
+              135
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              0.22,
+              0.22,
+              0.7
+            ]
+          },
+          {
+            "operation": "add_component",
+            "component_type": "/Script/Engine.StaticMeshComponent",
+            "component_name": "LeftLeg",
+            "attach_to": "DefaultSceneRoot"
+          },
+          {
+            "operation": "set_component_property",
+            "component_name": "LeftLeg",
+            "property": "static_mesh",
+            "value": "/Engine/BasicShapes/Cube.Cube"
+          },
+          {
+            "operation": "set_component_material",
+            "component_name": "LeftLeg",
+            "slot": 0,
+            "material": "/Game/Materials/M_BlueMetal.M_BlueMetal"
+          },
+          {
+            "operation": "set_component_transform",
+            "component_name": "LeftLeg",
+            "location": [
+              0,
+              -28,
+              40
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              0.25,
+              0.25,
+              0.8
+            ]
+          },
+          {
+            "operation": "add_component",
+            "component_type": "/Script/Engine.StaticMeshComponent",
+            "component_name": "RightLeg",
+            "attach_to": "DefaultSceneRoot"
+          },
+          {
+            "operation": "set_component_property",
+            "component_name": "RightLeg",
+            "property": "static_mesh",
+            "value": "/Engine/BasicShapes/Cube.Cube"
+          },
+          {
+            "operation": "set_component_material",
+            "component_name": "RightLeg",
+            "slot": 0,
+            "material": "/Game/Materials/M_BlueMetal.M_BlueMetal"
+          },
+          {
+            "operation": "set_component_transform",
+            "component_name": "RightLeg",
+            "location": [
+              0,
+              28,
+              40
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              0.25,
+              0.25,
+              0.8
+            ]
+          }
+        ],
+        "compile": true,
+        "save": true
+      }
+    }
+  ]
+}

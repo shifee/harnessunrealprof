@@ -1,0 +1,2539 @@
+{
+  "contract_version": "1.0",
+  "actions": [
+    {
+      "name": "asset.create",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+          },
+          "replace_existing": {
+            "const": false
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          },
+          "class": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "asset_class": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "factory": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "folder",
+          "name"
+        ],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "class"
+            ]
+          },
+          {
+            "required": [
+              "asset_class"
+            ]
+          },
+          {
+            "required": [
+              "factory"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "id": "asset_create",
+        "action": "asset.create",
+        "arguments": {
+          "folder": "/Game/Examples/Example.Example",
+          "name": "Example",
+          "class": "/Script/Engine.Actor"
+        }
+      }
+    },
+    {
+      "name": "asset.describe_types",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "asset_describe_types",
+        "action": "asset.describe_types",
+        "arguments": {}
+      }
+    },
+    {
+      "name": "asset.duplicate",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "asset_duplicate",
+        "action": "asset.duplicate",
+        "arguments": {
+          "source": "/Game/Examples/Example.Example",
+          "destination": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "asset.inspect",
+      "mutates": false,
+      "mutating": false,
+      "description": "Inspect asset identity and exists_on_disk (package file existence; does not prove latest in-memory values were saved).",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "asset"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "asset_inspect",
+        "action": "asset.inspect",
+        "arguments": {
+          "asset": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "asset.save",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "assets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^/Game(?:/|$)"
+            },
+            "minItems": 1,
+            "maxItems": 2000
+          },
+          "asset_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^/Game(?:/|$)"
+            },
+            "minItems": 1,
+            "maxItems": 2000
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^/Game(?:/|$)"
+            },
+            "minItems": 1,
+            "maxItems": 2000
+          },
+          "package_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^/Game(?:/|$)"
+            },
+            "minItems": 1,
+            "maxItems": 2000
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "assets"
+            ]
+          },
+          {
+            "required": [
+              "asset_paths"
+            ]
+          },
+          {
+            "required": [
+              "packages"
+            ]
+          },
+          {
+            "required": [
+              "package_paths"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "id": "asset_save",
+        "action": "asset.save",
+        "arguments": {
+          "assets": [
+            "/Game/Examples/Example.Example"
+          ]
+        }
+      }
+    },
+    {
+      "name": "asset.search",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "query": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "asset_search",
+        "action": "asset.search",
+        "arguments": {}
+      }
+    },
+    {
+      "name": "backend.capabilities",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "backend_capabilities",
+        "action": "backend.capabilities",
+        "arguments": {}
+      }
+    },
+    {
+      "name": "backend.describe",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "backend"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "backend_describe",
+        "action": "backend.describe",
+        "arguments": {
+          "backend": "Example"
+        }
+      }
+    },
+    {
+      "name": "backend.operation",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operation": {
+            "enum": [
+              "validate",
+              "inspect",
+              "mutate",
+              "diagnostics"
+            ]
+          },
+          "payload": {
+            "type": "object"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "backend",
+          "operation"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "backend_operation",
+        "action": "backend.operation",
+        "arguments": {
+          "backend": "Example",
+          "operation": "validate"
+        }
+      }
+    },
+    {
+      "name": "blueprint.compile",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "save": {
+            "type": "boolean"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_compile",
+        "action": "blueprint.compile",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "blueprint.create",
+      "mutates": true,
+      "mutating": true,
+      "description": "Create a Blueprint asset; components are added using blueprint.edit.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+          },
+          "replace_existing": {
+            "const": false
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          },
+          "parent_class": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "folder",
+          "name",
+          "parent_class"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_create",
+        "action": "blueprint.create",
+        "arguments": {
+          "folder": "/Game/Blueprints",
+          "name": "BP_Example",
+          "parent_class": "/Script/Engine.Actor"
+        }
+      }
+    },
+    {
+      "name": "blueprint.edit",
+      "mutates": true,
+      "mutating": true,
+      "description": "Edit components or variables using the listed operation schemas; compile and save default to true.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "const": "add_component"
+                    },
+                    "component_type": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^/"
+                    },
+                    "component_name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                    },
+                    "attach_to": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "conflict_mode": {
+                      "type": "string",
+                      "enum": [
+                        "fail",
+                        "reuse",
+                        "update"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "operation",
+                    "component_type",
+                    "component_name"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "const": "add_variable"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                    },
+                    "variable_type": {
+                      "enum": [
+                        "bool",
+                        "byte",
+                        "int",
+                        "int64",
+                        "float",
+                        "double",
+                        "string",
+                        "name",
+                        "text"
+                      ]
+                    },
+                    "conflict_mode": {
+                      "type": "string",
+                      "enum": [
+                        "fail",
+                        "reuse",
+                        "update"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "operation",
+                    "name",
+                    "variable_type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "const": "set_component_property"
+                    },
+                    "component_name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "property": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {},
+                    "conflict_mode": {
+                      "type": "string",
+                      "enum": [
+                        "fail",
+                        "reuse",
+                        "update"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "operation",
+                    "component_name",
+                    "property",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "const": "set_component_material"
+                    },
+                    "component_name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "slot": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "material": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^/"
+                    },
+                    "conflict_mode": {
+                      "type": "string",
+                      "enum": [
+                        "fail",
+                        "reuse",
+                        "update"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "operation",
+                    "component_name",
+                    "material"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "const": "set_component_transform"
+                    },
+                    "component_name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "location": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "rotation": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "scale": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "conflict_mode": {
+                      "type": "string",
+                      "enum": [
+                        "fail",
+                        "reuse",
+                        "update"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "operation",
+                    "component_name"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "const": "set_class_property"
+                    },
+                    "property": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {},
+                    "conflict_mode": {
+                      "type": "string",
+                      "enum": [
+                        "fail",
+                        "reuse",
+                        "update"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "operation",
+                    "property",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 1000
+          },
+          "compile": {
+            "type": "boolean"
+          },
+          "save": {
+            "type": "boolean"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint",
+          "operations"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_edit",
+        "action": "blueprint.edit",
+        "arguments": {
+          "blueprint": "/Game/Blueprints/BP_Example.BP_Example",
+          "operations": [
+            {
+              "operation": "add_variable",
+              "name": "Count",
+              "variable_type": "int"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "blueprint.graph.add_node",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "node_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "node": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "function_call"
+                  },
+                  "owner_class": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^/"
+                  },
+                  "function": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "owner_class",
+                  "function"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "event"
+                  },
+                  "owner_class": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^/"
+                  },
+                  "function": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "owner_class",
+                  "function"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "operator"
+                  },
+                  "owner_class": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^/"
+                  },
+                  "function": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "owner_class",
+                  "function"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "custom_event"
+                  },
+                  "event_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "event_name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "branch"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "sequence"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "reroute"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "self"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "variable_get"
+                  },
+                  "variable_name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "variable_name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "variable_set"
+                  },
+                  "variable_name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "variable_name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "dynamic_cast"
+                  },
+                  "target_class": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^/"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target_class"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "struct_make"
+                  },
+                  "struct_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^/"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "struct_path"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "struct_break"
+                  },
+                  "struct_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^/"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "struct_path"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "position": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint",
+          "node_id",
+          "node"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_graph_add_node",
+        "action": "blueprint.graph.add_node",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example",
+          "node_id": "Example",
+          "node": {
+            "kind": "function_call",
+            "owner_class": "/Script/Engine.Actor",
+            "function": "Example"
+          }
+        }
+      }
+    },
+    {
+      "name": "blueprint.graph.connect",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "from": {
+            "type": "object",
+            "properties": {
+              "node": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pin": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "node",
+              "pin"
+            ],
+            "additionalProperties": false
+          },
+          "to": {
+            "type": "object",
+            "properties": {
+              "node": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pin": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "node",
+              "pin"
+            ],
+            "additionalProperties": false
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint",
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_graph_connect",
+        "action": "blueprint.graph.connect",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example",
+          "from": {
+            "node": "Example",
+            "pin": "Example"
+          },
+          "to": {
+            "node": "Example",
+            "pin": "Example"
+          }
+        }
+      }
+    },
+    {
+      "name": "blueprint.graph.disconnect",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "from": {
+            "type": "object",
+            "properties": {
+              "node": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pin": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "node",
+              "pin"
+            ],
+            "additionalProperties": false
+          },
+          "to": {
+            "type": "object",
+            "properties": {
+              "node": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pin": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "node",
+              "pin"
+            ],
+            "additionalProperties": false
+          },
+          "all": {
+            "type": "boolean"
+          },
+          "node": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pin": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint"
+        ],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "from",
+              "to"
+            ]
+          },
+          {
+            "required": [
+              "all",
+              "node",
+              "pin"
+            ],
+            "properties": {
+              "all": {
+                "const": true
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "id": "blueprint_graph_disconnect",
+        "action": "blueprint.graph.disconnect",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example",
+          "from": {
+            "node": "Example",
+            "pin": "Example"
+          },
+          "to": {
+            "node": "Example",
+            "pin": "Example"
+          }
+        }
+      }
+    },
+    {
+      "name": "blueprint.graph.inspect",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_graph_inspect",
+        "action": "blueprint.graph.inspect",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "blueprint.graph.remove_node",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "node": {
+            "type": "string",
+            "minLength": 1
+          },
+          "node_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint"
+        ],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "node"
+            ]
+          },
+          {
+            "required": [
+              "node_id"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "id": "blueprint_graph_remove_node",
+        "action": "blueprint.graph.remove_node",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example",
+          "node": "Example"
+        }
+      }
+    },
+    {
+      "name": "blueprint.graph.set_pin_value",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "node": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pin": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint",
+          "node",
+          "pin",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_graph_set_pin_value",
+        "action": "blueprint.graph.set_pin_value",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example",
+          "node": "Example",
+          "pin": "Example",
+          "value": "Example"
+        }
+      }
+    },
+    {
+      "name": "blueprint.inspect",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "blueprint_inspect",
+        "action": "blueprint.inspect",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "content.create_folder",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "content_create_folder",
+        "action": "content.create_folder",
+        "arguments": {
+          "path": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "content.list",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "query": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "content_list",
+        "action": "content.list",
+        "arguments": {}
+      }
+    },
+    {
+      "name": "graph.describe",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "graph_describe",
+        "action": "graph.describe",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "graph.describe_node",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "function_call",
+              "event",
+              "operator",
+              "custom_event",
+              "branch",
+              "sequence",
+              "reroute",
+              "self",
+              "variable_get",
+              "variable_set",
+              "dynamic_cast",
+              "struct_make",
+              "struct_break"
+            ]
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "graph_describe_node",
+        "action": "graph.describe_node",
+        "arguments": {
+          "kind": "function_call"
+        }
+      }
+    },
+    {
+      "name": "graph.search_nodes",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "blueprint": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "graph": {
+            "type": "string",
+            "minLength": 1
+          },
+          "query": {
+            "type": "string"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "blueprint"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "graph_search_nodes",
+        "action": "graph.search_nodes",
+        "arguments": {
+          "blueprint": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "level.inspect",
+      "mutates": false,
+      "mutating": false,
+      "description": "Read current-level actors, including name, label, class, path, location, rotation and scale. Filters are top-level arguments.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "selected_only": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "level_inspect",
+        "action": "level.inspect",
+        "arguments": {
+          "class": "/Script/Engine.PlayerStart",
+          "limit": 100
+        }
+      }
+    },
+    {
+      "name": "level.set_actor_property",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "actor_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actor_label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "property": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {},
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "property",
+          "value"
+        ],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "actor_name"
+            ]
+          },
+          {
+            "required": [
+              "actor_label"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "id": "level_set_actor_property",
+        "action": "level.set_actor_property",
+        "arguments": {
+          "property": "Example",
+          "value": null,
+          "actor_name": "Example"
+        }
+      }
+    },
+    {
+      "name": "level.set_actor_transform",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "actor_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actor_label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "transform": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "rotation": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "scale": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "transform"
+        ],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "actor_name"
+            ]
+          },
+          {
+            "required": [
+              "actor_label"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "id": "level_set_actor_transform",
+        "action": "level.set_actor_transform",
+        "arguments": {
+          "transform": {},
+          "actor_name": "Example"
+        }
+      }
+    },
+    {
+      "name": "level.spawn_actor",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "actor_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actor_label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "class": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "level": {
+            "type": "string",
+            "minLength": 1
+          },
+          "transform": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "rotation": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "scale": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "class"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "level_spawn_actor",
+        "action": "level.spawn_actor",
+        "arguments": {
+          "class": "/Script/Engine.Actor"
+        }
+      }
+    },
+    {
+      "name": "material.create",
+      "mutates": true,
+      "mutating": true,
+      "description": "Create a simple material with BaseColor, Metallic and Roughness; creation saves it.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+          },
+          "replace_existing": {
+            "const": false
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          },
+          "base_color": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "metallic": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "roughness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "folder",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "material_create",
+        "action": "material.create",
+        "arguments": {
+          "folder": "/Game/Materials",
+          "name": "M_Example",
+          "base_color": [
+            0.1,
+            0.2,
+            0.8,
+            1
+          ],
+          "metallic": 1,
+          "roughness": 0.3
+        }
+      }
+    },
+    {
+      "name": "material.inspect",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "material": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "material"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "material_inspect",
+        "action": "material.inspect",
+        "arguments": {
+          "material": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "material_instance.create",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+          },
+          "parent": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "folder",
+          "name",
+          "parent"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "material_instance_create",
+        "action": "material_instance.create",
+        "arguments": {
+          "folder": "/Game/Examples/Example.Example",
+          "name": "Example",
+          "parent": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "material_instance.set_parameters",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "material_instance": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/Game(?:/|$)"
+          },
+          "scalar": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "vector": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 4,
+              "maxItems": 4
+            }
+          },
+          "static_switch": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "material_instance"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "material_instance_set_parameters",
+        "action": "material_instance.set_parameters",
+        "arguments": {
+          "material_instance": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "object.call",
+      "mutates": true,
+      "mutating": true,
+      "description": "Invoke only runtime-allowlisted functions discovered with object.describe_functions.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "function": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arguments": {
+            "type": "object"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "function"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "object_call",
+        "action": "object.call",
+        "arguments": {
+          "object": "/Game/Examples/Example.Example",
+          "function": "Example"
+        }
+      }
+    },
+    {
+      "name": "object.describe",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "object"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "object_describe",
+        "action": "object.describe",
+        "arguments": {
+          "object": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "object.describe_functions",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "object"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "object_describe_functions",
+        "action": "object.describe_functions",
+        "arguments": {
+          "object": "/Game/Examples/Example.Example"
+        }
+      }
+    },
+    {
+      "name": "object.inspect",
+      "mutates": false,
+      "mutating": false,
+      "description": "Read explicitly selected reflected editor properties.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "properties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 2000
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "properties"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "object_inspect",
+        "action": "object.inspect",
+        "arguments": {
+          "object": "/Game/Examples/Example.Example",
+          "properties": [
+            "Example"
+          ]
+        }
+      }
+    },
+    {
+      "name": "object.set",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "properties": {
+            "type": "object",
+            "minProperties": 1
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "properties"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "object_set",
+        "action": "object.set",
+        "arguments": {
+          "object": "/Game/Examples/Example.Example",
+          "properties": {
+            "ExampleProperty": null
+          }
+        }
+      }
+    },
+    {
+      "name": "project.save",
+      "mutates": true,
+      "mutating": true,
+      "description": "Persist level/assets explicitly; do not add this to inspection tasks.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "save_level": {
+            "type": "boolean"
+          },
+          "save_assets": {
+            "type": "boolean"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "project_save",
+        "action": "project.save",
+        "arguments": {}
+      }
+    },
+    {
+      "name": "recipe.execute",
+      "mutates": true,
+      "mutating": true,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "recipe": {
+            "type": "object"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "recipe"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "recipe_execute",
+        "action": "recipe.execute",
+        "arguments": {
+          "recipe": {}
+        }
+      }
+    },
+    {
+      "name": "recipe.validate",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "recipe": {
+            "type": "object"
+          },
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "recipe"
+        ],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "recipe_validate",
+        "action": "recipe.validate",
+        "arguments": {
+          "recipe": {}
+        }
+      }
+    },
+    {
+      "name": "system.capabilities",
+      "mutates": false,
+      "mutating": false,
+      "description": "",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "system_capabilities",
+        "action": "system.capabilities",
+        "arguments": {}
+      }
+    },
+    {
+      "name": "system.describe_actions",
+      "mutates": false,
+      "mutating": false,
+      "description": "Discover action argument schemas and mutation flags.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "conflict_mode": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "reuse",
+              "update"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "example": {
+        "id": "system_describe_actions",
+        "action": "system.describe_actions",
+        "arguments": {}
+      }
+    }
+  ]
+}

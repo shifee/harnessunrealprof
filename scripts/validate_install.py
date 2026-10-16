@@ -6,6 +6,7 @@ import ast
 import json
 import py_compile
 import re
+import runpy
 import sys
 import tempfile
 from pathlib import Path
@@ -22,6 +23,8 @@ OPTIONAL_UE58_PLUGINS = (
 )
 REQUIRED_FILES = (
     "Content/Python/execute_actions.py",
+    "Content/Python/action_contract.py",
+    "Content/Python/backend_registry.py",
     "Content/Python/init_unreal.py",
     "Content/Python/actions.json",
     ".agents/skills/unreal-game-builder/SKILL.md",
@@ -121,7 +124,7 @@ def validate(root):
         checks.append("source-machine absolute paths are absent")
 
     with tempfile.TemporaryDirectory(prefix="unreal-harness-pycompile-") as cache_dir:
-        for relative in ("Content/Python/execute_actions.py", "Content/Python/init_unreal.py"):
+        for relative in ("Content/Python/execute_actions.py", "Content/Python/init_unreal.py", "Content/Python/action_contract.py", "Content/Python/backend_registry.py"):
             path = root / relative
             if path.is_file():
                 try:
@@ -148,6 +151,20 @@ def validate(root):
     if executor_path.is_file() and schema_path.is_file():
         try:
             handler_actions = action_handlers_from_python(executor_path)
+            distribution = Path(__file__).resolve().parents[1] / "unreal_harness/action_contract.py"
+            runtime_source = distribution.parent.parent / "templates/unreal-project/Content/Python"
+            for filename in ("execute_actions.py", "backend_registry.py", "init_unreal.py"):
+                installed_runtime = root / "Content/Python" / filename
+                if installed_runtime.is_file() and installed_runtime.read_text(encoding="utf-8-sig") != (runtime_source / filename).read_text(encoding="utf-8-sig"):
+                    errors.append("Installed " + filename + " is outdated or modified; update with install.py --runtime-only")
+            contract = runpy.run_path(str(distribution))
+            if set(contract["ACTION_METADATA"]) != handler_actions:
+                errors.append("Shared action contract does not match installed ACTION_HANDLERS")
+            installed_contract = root / "Content/Python/action_contract.py"
+            if installed_contract.is_file() and installed_contract.read_text(encoding="utf-8-sig") != distribution.read_text(encoding="utf-8"):
+                errors.append("Installed action contract is outdated; reinstall harness runtime")
+            elif installed_contract.is_file():
+                checks.append("installed shared action contract matches distribution")
             schema_text = schema_path.read_text(encoding="utf-8")
             schema_actions = set(re.findall(r'^## `([^`]+)`$', schema_text, re.MULTILINE))
             if handler_actions != schema_actions:

@@ -1,4 +1,6 @@
 import json
+import ast
+import os
 import runpy
 import shutil
 import sys
@@ -14,10 +16,177 @@ ACTION_FIXTURE = ROOT / "tests/fixtures/actions-v0.1.json"
 
 
 class ExecutorContractTests(unittest.TestCase):
+    def test_native_graph_failure_keeps_potentially_touched_blueprint(self):
+        bp = "/Game/Test/BP_Test.BP_Test"
+        class Transaction:
+            def __init__(self, title): pass
+            def cancel(self): pass
+        for response in ('{"success": false, "error": "native failed"}', 'bad native JSON'):
+            def configure(fake):
+                fake.ScopedEditorTransaction = Transaction
+                fake.Vector2D = lambda x, y: (x, y)
+                fake.UnrealCodexGraphLibrary = types.SimpleNamespace(add_node=lambda *args: response)
+            result = self.run_document({"commands": [{"id": "node", "action": "blueprint.graph.add_node",
+                "arguments": {"blueprint": bp, "node_id": "first", "node": {"kind": "sequence"}}}]}, configure)
+            self.assertFalse(result["success"])
+            self.assertEqual(result["changed_objects"], [bp])
+            self.assertEqual(result["commands"][0]["changed_objects"], [bp])
+
+    def test_graph_aliases_are_initialized_and_resolved_by_full_executor(self):
+        connected = []
+        class Transaction:
+            def __init__(self, title): pass
+            def cancel(self): pass
+        def configure(fake):
+            fake.ScopedEditorTransaction = Transaction
+            fake.Vector2D = lambda x, y: (x, y)
+            fake.UnrealCodexGraphLibrary = types.SimpleNamespace(
+                add_node=lambda bp, graph, kind, spec, pos: json.dumps({"success": True, "node_guid": "guid-" + kind}),
+                connect_pins=lambda *args: connected.append(args) or json.dumps({"success": True}))
+        bp = "/Game/Test/BP_Test.BP_Test"
+        commands = [
+            {"id": "a", "action": "blueprint.graph.add_node", "arguments": {"blueprint": bp, "node_id": "first", "node": {"kind": "sequence"}}},
+            {"id": "b", "action": "blueprint.graph.add_node", "arguments": {"blueprint": bp, "node_id": "second", "node": {"kind": "branch"}}},
+            {"id": "wire", "action": "blueprint.graph.connect", "depends_on": ["a", "b"], "arguments": {"blueprint": bp, "from": {"node": "first", "pin": "then_0"}, "to": {"node": "second", "pin": "execute"}}},
+        ]
+        result = self.run_document({"commands": commands}, configure)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(connected[0][2:6], ("guid-sequence", "then_0", "guid-branch", "execute"))
+
+    def test_package_disk_check_uses_project_content_and_rejects_escape_paths(self):
+        node = next(node for node in ast.parse(EXECUTOR.read_text(encoding="utf-8")).body if isinstance(node, ast.FunctionDef) and node.name == "package_file_exists")
+        with tempfile.TemporaryDirectory() as directory:
+            content = Path(directory) / "Content"
+            python_dir = content / "Python"
+            python_dir.mkdir(parents=True)
+            (content / "M_Test.uasset").write_bytes(b"fixture")
+            namespace = {"os": os, "SCRIPT_DIR": str(python_dir)}
+            exec(compile(ast.Module(body=[node], type_ignores=[]), str(EXECUTOR), "exec"), namespace)
+            exists = namespace["package_file_exists"]
+            self.assertTrue(exists("/Game/M_Test"))
+            self.assertFalse(exists("/Game/M_Missing"))
+            self.assertFalse(exists("/Game/../M_Test"))
+            self.assertFalse(exists("/Game/C:\\M_Test"))
+            self.assertFalse(exists("/Game//outside/M_Test"))
+
+    def test_iterative_agent_uses_real_executor_for_research_and_acceptance(self):
+        from unittest.mock import patch
+        from unreal_harness.task_agent import TaskAgent
+        from unreal_harness.providers import OpenAICompatiblePlanner
+        folders = {"/Game"}
+        class Transaction:
+            def __init__(self, title): pass
+            def cancel(self): pass
+        def configure(fake):
+            fake.SystemLibrary = types.SimpleNamespace(get_engine_version=lambda: "5.8")
+            fake.ScopedEditorTransaction = Transaction
+            fake.EditorAssetLibrary = types.SimpleNamespace(does_directory_exist=lambda path: path in folders,
+                make_directory=lambda path: folders.add(path) or True, list_assets=lambda *args: [])
+        owner = self
+        class Transport:
+            def submit(self, document, **kwargs):
+                return owner.run_document(document, configure)
+        research = {"status": "act", "reason": "inspect folders", "commands": [{"id": "read", "action": "content.list", "arguments": {"path": "/Game"}}]}
+        preparation = {"status": "ready", "goal": "create requested folder", "criteria": [{"id": "folder", "description": "Folder exists",
+            "command": {"id": "check", "action": "content.list", "arguments": {"path": "/Game/Loop"}}, "path": "directory_exists", "operator": "equals", "value": True}]}
+        create = {"status": "act", "reason": "create folder", "commands": [{"id": "create", "action": "content.create_folder", "arguments": {"path": "/Game/Loop"}}]}
+        finish = {"status": "finish", "reason": "check outcome", "commands": []}
+        def response(value):
+            return {"choices": [{"message": {"content": json.dumps(value)}}]}
+        planner = OpenAICompatiblePlanner(model="test")
+        with patch.object(planner, "_select_actions", return_value={"content.list", "content.create_folder"}), patch.object(planner, "_request", side_effect=[response(research), response(preparation), response(create), response(finish)]):
+            result = TaskAgent(Transport(), planner).run("create /Game/Loop")
+        self.assertTrue(result["success"], result)
+        self.assertIn("/Game/Loop", folders)
+
+    def test_save_only_selected_asset_and_check_native_failure(self):
+        selected = types.SimpleNamespace(get_path_name=lambda: "/Game/Test/A.A")
+        for native_success in (True, False):
+            with self.subTest(native_success=native_success):
+                saved = []
+                class Transaction:
+                    def __init__(self, title): pass
+                    def cancel(self): pass
+                def configure(fake):
+                    fake.ScopedEditorTransaction = Transaction
+                    fake.load_asset = lambda path: selected
+                    fake.EditorAssetLibrary = types.SimpleNamespace(
+                        save_loaded_asset=lambda asset, dirty: saved.append(asset) or native_success)
+                result = self.run_document({"commands": [{"id": "save", "action": "asset.save", "arguments": {"assets": ["/Game/Test/A.A"]}}]}, configure)
+                self.assertEqual(saved, [selected])
+                self.assertEqual(result["success"], native_success)
+                if not native_success:
+                    self.assertEqual(result["commands"][0]["error_code"], "save_failed")
+
+    def test_missing_creation_arguments_stop_entire_batch_before_mutation(self):
+        touched = []
+        def configure(fake):
+            fake.EditorAssetLibrary = types.SimpleNamespace(make_directory=lambda path: touched.append(path))
+        result = self.run_document({"format_version": "1.0", "commands": [
+            {"id": "folder", "action": "content.create_folder", "arguments": {"path": "/Game/Test"}},
+            {"id": "invalid", "action": "blueprint.create", "arguments": {"name": "BP_Test"}},
+        ]}, configure)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["errors"][0]["code"], "missing_argument")
+        self.assertEqual(touched, [])
+        self.assertEqual(result["changed_objects"], [])
+
+    def test_save_and_unrelated_mutations_blocked_after_failure(self):
+        saved = []
+        class Transaction:
+            def __init__(self, title): pass
+            def cancel(self): pass
+        def configure(fake):
+            fake.ScopedEditorTransaction = Transaction
+            fake.EditorAssetLibrary = types.SimpleNamespace(
+                does_directory_exist=lambda path: False,
+                make_directory=lambda path: False,
+                save_loaded_asset=lambda *args: saved.append(args))
+        result = self.run_document({"format_version": "1.0", "commands": [
+            {"id": "failed", "action": "content.create_folder", "arguments": {"path": "/Game/Test"}},
+            {"id": "save", "action": "asset.save", "arguments": {"assets": ["/Game/Test/A.A"]}},
+            {"id": "other", "action": "content.create_folder", "arguments": {"path": "/Game/Other"}},
+        ]}, configure)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["commands"][1]["error_code"], "execution_blocked")
+        self.assertTrue(result["commands"][2]["skipped"])
+        self.assertEqual(saved, [])
+
+    def test_agent_model_repair_execute_and_read_back_using_real_executor(self):
+        from unittest.mock import patch
+        from unreal_harness.agent import AgentRun
+        from unreal_harness.providers import OpenAICompatiblePlanner
+        folders = set()
+        class Transaction:
+            def __init__(self, title): pass
+            def cancel(self): pass
+        def configure(fake):
+            fake.SystemLibrary = types.SimpleNamespace(get_engine_version=lambda: "5.8")
+            fake.ScopedEditorTransaction = Transaction
+            fake.EditorAssetLibrary = types.SimpleNamespace(
+                does_directory_exist=lambda path: path in folders,
+                make_directory=lambda path: folders.add(path) or True,
+                list_assets=lambda *args: [])
+        owner = self
+        class Transport:
+            def submit(self, doc):
+                return owner.run_document(dict(doc, format_version="1.0"), configure)
+        good = {"commands": [{"id": "create", "action": "content.create_folder", "arguments": {"path": "/Game/Checked"}}]}
+        bad = {"commands": [{"id": "create", "action": "content.create_folder", "arguments": {}}]}
+        def response(plan):
+            return {"choices": [{"message": {"content": json.dumps(plan)}}]}
+        planner = OpenAICompatiblePlanner(model="test")
+        with patch.object(planner, "_request", side_effect=[response({"actions": ["content.create_folder"]}), response(bad), response(good)]):
+            result = AgentRun(Transport(), planner).run("create folder")
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["phase"], "verify")
+        self.assertEqual(folders, {"/Game/Checked"})
+
     def run_document(self, document, configure_unreal=None):
         with tempfile.TemporaryDirectory(prefix="unreal-codex-executor-") as directory:
             root = Path(directory)
             shutil.copy2(EXECUTOR, root / "execute_actions.py")
+            shutil.copy2(ROOT / "unreal_harness/action_contract.py", root / "action_contract.py")
             (root / "actions.json").write_text(json.dumps(document), encoding="utf-8")
             fake_unreal = types.ModuleType("unreal")
             fake_unreal.log = lambda message: None
@@ -88,6 +257,7 @@ class ExecutorContractTests(unittest.TestCase):
             result.pop("run_id")
             result.pop("started_at")
             result.pop("finished_at")
+            result.pop("audit_path")
         self.assertEqual(first, second)
 
     def test_duplicate_ids_fail_before_execution(self):
@@ -146,6 +316,7 @@ class ExecutorContractTests(unittest.TestCase):
 
         def configure(fake_unreal):
             fake_unreal.EditorAssetLibrary = types.SimpleNamespace(
+                does_directory_exist=lambda path: True,
                 list_assets=lambda path, recursive, include_folder: [UnrealPath()]
             )
 
